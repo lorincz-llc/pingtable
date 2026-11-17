@@ -171,6 +171,7 @@ matters: the settings include commands that pingtable will run.
 | `crates/app` | two programs: `pingtable` (command line, config file, HTTP server) and `pingtable-window` (the Windows window, a WebView2 frame around the same interface) |
 | `crates/app/assets` | Windows icon and manifest; the icon is drawn by `scripts/make-icon.py` |
 | `ui/` | the interface: plain HTML, CSS and JavaScript, no build step. Compiled into the binary. |
+| `site/` | the pingtable.net page: plain HTML, CSS and JavaScript, no build step, same two looks as the app |
 | `brand/` | theme record and the icon options sheet |
 
 While working on the interface, serve it from disk so a browser refresh picks
