@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "id": "pingtable",
+  "project": "pingtable",
+  "version": "0.3.0",
+  "status": "direction-confirmed",
+  "inspiration": [],
+  "choices": {
+    "layout": "Full-window data table under a 64px top bar; bottom detail drawer; hard 1px and 2px rules, no rounded corners, no shadows except on overlays",
+    "palette": "Two looks. Light (the default): white, black rules and text, Petrol #0B5F6A accent. Dark, called Graphite: neutral dark grey #111315 with a lighter Petrol #56C5D0. Red-orange for down, amber for failing, green only for the glow when a host comes back",
+    "display_font": "Heavy grotesque system stack (Archivo Black, Inter Tight, Segoe UI Variable Display) at weight 900, uppercase for headings and buttons",
+    "body_font": "Monospace system stack (JetBrains Mono, Cascadia Mono, Consolas) with tabular numerals",
+    "mark": "Wordmark PINGTABLE in the display font beside a Petrol square",
+    "supergraphic": "none",
+    "texture": "none",
+    "symbol": "One Petrol square (#1596A6) on a transparent ground: candidate B, Square, from brand/icons/preview.html"
+  },
+  "tokens": {
+    "light": {
+      "bg": "#FFFFFF",
+      "surface": "#F6F6F3",
+      "raised": "#ECECE8",
+      "rule": "#D6D6D0",
+      "rule_strong": "#000000",
+      "text": "#000000",
+      "dim": "#555555",
+      "faint": "#8A8A85",
+      "accent": "#0B5F6A",
+      "accent_block": "#0B5F6A",
+      "down": "#C8371C",
+      "warn": "#9A6200",
+      "good": "#1A7F4B"
+    },
+    "dark": {
+      "bg": "#111315",
+      "surface": "#171A1C",
+      "raised": "#1E2225",
+      "rule": "#2C3135",
+      "rule_strong": "#E6E8EA",
+      "text": "#ECEEEF",
+      "dim": "#9AA1A6",
+      "faint": "#646B70",
+      "accent": "#56C5D0",
+      "accent_block": "#0B5F6A",
+      "down": "#F26B50",
+      "warn": "#E9B949",
+      "good": "#4AD98A"
+    },
+    "icon": "#1596A6",
+    "row_height_px": 32,
+    "motion": "Nothing blinks and nothing flashes on routine updates. A row glows softly for four seconds when its host goes down (red) or comes back (green). Short fades on overlays only",
+    "source": "ui/app.css :root and :root[data-theme=dark] custom properties are the working copy"
+  },
+  "decisions": [
+    {
+      "date": "2026-11-16",
+      "status": "confirmed",
+      "decision": "One web-technology interface is shared by the Windows window and the browser flavour, finished to a high standard."
+    },
+    {
+      "date": "2026-11-16",
+      "status": "confirmed",
+      "decision": "Exactly two looks: light, the default, and a dark look called Graphite, switched by one control on the main bar. No theme list and no theme files."
+    },
+    {
+      "date": "2026-11-16",
+      "status": "confirmed",
+      "decision": "Restrained motion: nothing blinks, nothing flashes on routine updates; a row glows briefly red when its host goes down and green when it comes back."
+    },
+    {
+      "date": "2026-11-16",
+      "status": "confirmed",
+      "decision": "Icon: candidate B, Square, as a plain Petrol square with no tile."
+    },
+    {
+      "date": "2026-11-16",
+      "status": "confirmed",
+      "decision": "Results first: IP address beside the host, then last, trend and average; columns can be resized and reordered."
+    },
+    {
+      "date": "2026-11-16",
+      "status": "proposed",
+      "decision": "Exact colour values and the system font stacks (none bundled) are a first draft."
+    }
+  ],
+  "rights": {
+    "trademark_clearance": "not-assessed",
+    "registration": "not-verified",
+    "provenance": "Original work. Fonts are system fonts; none are bundled. The name has not been checked for trademarks."
+  }
+}

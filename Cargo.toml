@@ -1,0 +1,21 @@
+[workspace]
+members = ["crates/core", "crates/app"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+authors = ["pingtable <pingtable@lorincz.llc>"]
+homepage = "https://pingtable.net"
+license = "Apache-2.0"
+repository = "https://github.com/lorincz-llc/pingtable"
+edition = "2021"
+publish = false
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

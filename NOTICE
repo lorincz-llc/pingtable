@@ -1,0 +1,9 @@
+pingtable
+Copyright 2026 Lorincz LLC
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The Windows package includes WebView2Loader.dll, part of the Microsoft Edge
+WebView2 SDK, Copyright (C) Microsoft Corporation, redistributed under the
+terms of that SDK. Other third-party components are listed in
+THIRD-PARTY-NOTICES.md.

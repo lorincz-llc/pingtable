@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff">
+<title>pingtable</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/app.css">
+<script src="/theme.js"></script>
+</head>
+<body>
+
+<header class="bar" id="bar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <h1>PINGTABLE</h1>
+  </div>
+
+  <div class="tallies" id="tallies" aria-live="polite">
+    <button class="tally" data-filter="all" title="Show every host">
+      <span class="tally-n" id="n-total">0</span><span class="tally-l">hosts</span>
+    </button>
+    <button class="tally tally-up" data-filter="up" title="Show hosts that answer">
+      <span class="tally-n" id="n-up">0</span><span class="tally-l">up</span>
+    </button>
+    <button class="tally tally-down" data-filter="down" title="Show hosts that do not answer">
+      <span class="tally-n" id="n-down">0</span><span class="tally-l">down</span>
+    </button>
+    <button class="tally tally-muted" data-filter="muted" id="tally-muted" hidden title="Show muted hosts">
+      <span class="tally-n" id="n-muted">0</span><span class="tally-l">muted</span>
+    </button>
+  </div>
+
+  <div class="run" id="run-state" title="">
+    <span class="run-light" aria-hidden="true"></span>
+    <span class="run-text" id="run-text">STOPPED</span>
+    <span class="run-sub" id="run-sub"></span>
+  </div>
+
+  <div class="tools">
+    <label class="search">
+      <span class="visually-hidden">Filter hosts</span>
+      <input id="search" type="search" placeholder="Filter  /" autocomplete="off" spellcheck="false">
+    </label>
+    <button class="btn btn-primary" id="btn-toggle" title="Start or stop the regular pinging (S)">START</button>
+    <button class="btn" id="btn-add" title="Add hosts (A)">+ ADD</button>
+    <button class="btn btn-icon" id="btn-settings" title="Settings (,)" aria-label="Settings">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="9" y="2" width="3" height="4" fill="currentColor"/><rect x="4" y="6" width="3" height="4" fill="currentColor"/><rect x="10" y="10" width="3" height="4" fill="currentColor"/></svg>
+    </button>
+    <button class="btn btn-icon" id="btn-theme" title="Switch between dark and light (T)" aria-label="Switch between dark and light">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/><rect x="8" y="2" width="6" height="12" fill="currentColor"/></svg>
+    </button>
+    <div class="menu-wrap">
+      <button class="btn btn-icon" id="btn-menu" aria-haspopup="true" aria-expanded="false" title="More">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+      </button>
+      <div class="menu" id="menu" hidden>
+        <div class="menu-head">Columns</div>
+        <div class="menu-cols" id="menu-cols"></div>
+        <div class="menu-head">View</div>
+        <button class="menu-item" id="mi-group"><span class="check"></span>Group rows</button>
+        <button class="menu-item" id="mi-widths">Reset columns</button>
+        <button class="menu-item" id="mi-sound"><span class="check"></span>Sound on down / up</button>
+        <div class="menu-head">Hosts</div>
+        <button class="menu-item" id="mi-add">Add hosts…<span class="hint">A</span></button>
+        <button class="menu-item" id="mi-list">Edit the host list…<span class="hint">H</span></button>
+        <button class="menu-item" id="mi-settings">Settings…<span class="hint">,</span></button>
+        <div class="menu-head">Export</div>
+        <a class="menu-item" id="mi-csv" download>Table as CSV</a>
+        <a class="menu-item" id="mi-json" download>Table as JSON</a>
+        <div class="menu-head">Data</div>
+        <button class="menu-item" id="mi-measure">Measure for a set time…</button>
+        <button class="menu-item" id="mi-now">Ping every host once, now</button>
+        <button class="menu-item" id="mi-unmute">Unmute every host</button>
+        <button class="menu-item menu-danger" id="mi-reset">Reset all counters</button>
+        <div class="menu-head">Help</div>
+        <button class="menu-item" id="mi-keys">Keyboard shortcuts<span class="hint">F1</span></button>
+        <button class="menu-item" id="mi-about">About pingtable</button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="banner" id="banner" hidden></div>
+
+<main class="stage" id="stage">
+  <div class="grid" id="grid" tabindex="0" role="grid" aria-label="Hosts">
+    <div class="thead" id="thead" role="row"></div>
+    <div class="tbody" id="tbody"></div>
+  </div>
+
+  <section class="empty" id="empty" hidden>
+    <h2>NO HOSTS YET</h2>
+    <p>Type the machines you want to watch, one per line or separated by spaces.</p>
+    <pre>192.168.1.1
+nas.lan every=5s
+example.com:443
+10.0.0.0/24</pre>
+    <div class="empty-actions">
+      <button class="btn btn-primary" id="btn-empty-add">ADD HOSTS</button>
+      <button class="btn" id="btn-empty-example">USE THE EXAMPLE HOSTS</button>
+    </div>
+  </section>
+
+  <aside class="detail" id="detail" hidden aria-label="Host detail">
+    <div class="detail-grip" id="detail-grip" title="Drag to resize"></div>
+    <header class="detail-head">
+      <span class="sq" id="d-sq"></span>
+      <h2 id="d-title"></h2>
+      <span class="d-state" id="d-state"></span>
+      <span class="d-meta" id="d-meta"></span>
+      <span class="spacer"></span>
+      <button class="btn btn-small" id="d-toggle"></button>
+      <button class="btn btn-small btn-icon" id="d-close" title="Close (Esc)">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+      </button>
+    </header>
+    <div class="detail-body">
+      <div class="tiles" id="d-tiles"></div>
+      <div class="chart-wrap">
+        <div class="pane-title">Round-trip time, ms<span id="d-chart-range"></span></div>
+        <div class="chart-box"><canvas id="d-chart"></canvas></div>
+        <div class="chart-tip" id="d-tip" hidden></div>
+      </div>
+      <div class="runs-wrap">
+        <div class="pane-title">Timeline</div>
+        <div class="runs" id="d-runs"></div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<footer class="foot" id="foot">
+  <button class="foot-item foot-btn" id="foot-src" title="Where pings are sent from. Click to change it."></button>
+  <button class="foot-item foot-btn" id="foot-rate" title="How often hosts are pinged. Click to change it."></button>
+  <span class="foot-item" id="foot-flight"></span>
+  <span class="foot-item" id="foot-sel" hidden></span>
+  <span class="spacer"></span>
+  <span class="foot-item" id="foot-shown" hidden></span>
+  <span class="foot-item" id="foot-ver"></span>
+</footer>
+
+<div class="menu ctx" id="ctx" hidden role="menu"></div>
+
+<div class="toasts" id="toasts" aria-live="assertive"></div>
+
+<dialog class="dlg" id="dlg-hosts">
+  <form method="dialog" class="dlg-form" id="hosts-form">
+    <header class="dlg-head"><h2>HOST LIST</h2></header>
+    <div class="dlg-body">
+      <div class="hosts-cols">
+        <div class="hosts-edit">
+          <textarea id="f-hosts" spellcheck="false" autocomplete="off" wrap="off" aria-label="Host list"></textarea>
+          <div class="parse-row">
+            <div class="parse" id="parse-line">&nbsp;</div>
+            <button type="button" class="btn btn-small" id="btn-import" title="Add hosts from a CSV or text file">IMPORT A FILE…</button>
+            <button type="button" class="btn btn-small" id="btn-defaults" title="Put pingtable's example hosts back in the editor">RESTORE DEFAULT HOSTS</button>
+            <input type="file" id="f-import" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
+          </div>
+          <ul class="parse-warn" id="parse-warn"></ul>
+        </div>
+        <div class="hosts-help">
+          <label class="chk"><input type="checkbox" id="f-described"><span>One host per line, followed by a description</span></label>
+          <h3>What you can type</h3>
+          <dl>
+            <dt>nas.lan&ensp;192.168.1.10</dt><dd>ICMP ping</dd>
+            <dt>example.com:443</dt><dd>TCP connect to a port</dd>
+            <dt>https://example.com</dt><dd>TCP 443 (http is 80)</dd>
+            <dt>[2001:db8::1]:22</dt><dd>IPv6 with a port</dd>
+            <dt>10.0.0.1-10.0.0.20</dt><dd>every address in a range</dd>
+            <dt>10.0.0.0/24</dt><dd>every address in a block</dd>
+            <dt>Group: Home lab</dt><dd>start a group</dd>
+            <dt># note</dt><dd>ignored line</dd>
+          </dl>
+          <h3>Options, after a host or a group</h3>
+          <dl>
+            <dt>every=5s</dt><dd>its own interval</dd>
+            <dt>timeout=300ms</dt><dd>its own timeout</dd>
+            <dt>tag=lan</dt><dd>a tag you can filter on</dd>
+          </dl>
+          <h3>Shape the ping packet</h3>
+          <dl>
+            <dt>size=1400</dt><dd>payload bytes</dd>
+            <dt>ttl=8</dt><dd>hop limit</dd>
+            <dt>df=on</dt><dd>do not fragment</dd>
+            <dt>dscp=46</dt><dd>traffic marking</dd>
+            <dt>data=hello</dt><dd>payload contents, or 0xBEEF</dd>
+          </dl>
+          <label class="chk"><input type="checkbox" id="f-skipfirst"><span>Skip the first address of a block</span></label>
+          <label class="chk"><input type="checkbox" id="f-skiplast"><span>Skip the last address of a block</span></label>
+        </div>
+      </div>
+    </div>
+    <footer class="dlg-foot">
+      <span class="dlg-msg" id="dlg-msg"></span>
+      <button type="button" class="btn" id="dlg-cancel">CANCEL</button>
+      <button type="button" class="btn" id="dlg-reset" title="Apply and clear every counter">APPLY AND RESET</button>
+      <button type="button" class="btn btn-primary" id="dlg-apply" title="Apply; hosts still in the list keep their history">APPLY</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog class="dlg dlg-mid" id="dlg-settings">
+  <form method="dialog" class="dlg-form" id="settings-form">
+    <header class="dlg-head">
+      <h2>SETTINGS</h2>
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab is-on" data-tab="pinging" role="tab">Pinging</button>
+        <button type="button" class="tab" data-tab="network" role="tab">Network</button>
+        <button type="button" class="tab" data-tab="alerts" role="tab">Alerts</button>
+      </div>
+    </header>
+    <div class="dlg-body">
+      <section class="tabpane is-on" data-pane="pinging">
+        <div class="fields">
+          <label class="fld"><span>Ping each host every</span><div class="unit"><input type="number" id="f-interval" min="1" max="86400"><i>seconds</i></div></label>
+          <label class="fld"><span>Give up on a ping after</span><div class="unit"><input type="number" id="f-timeout" min="50" max="60000" step="50"><i>ms</i></div></label>
+          <label class="fld"><span>Pings in flight at once, at most</span><div class="unit"><input type="number" id="f-concurrent" min="1" max="1000"></div></label>
+          <label class="fld"><span>Samples kept per host</span><div class="unit"><input type="number" id="f-history" min="10" max="100000"></div></label>
+        </div>
+        <div class="checks">
+          <label class="chk"><input type="checkbox" id="f-repeat"><span>Keep pinging until stopped</span></label>
+          <label class="chk"><input type="checkbox" id="f-autostart"><span>Start pinging when pingtable starts</span></label>
+        </div>
+        <p class="hint">A host can have its own interval and timeout: add <b>every=5s</b> or <b>timeout=300ms</b> after it in the host list.</p>
+      </section>
+
+      <section class="tabpane" data-pane="network">
+        <div class="fields">
+          <label class="fld"><span>Send IPv4 pings from</span><div class="unit"><select id="f-src4"></select></div></label>
+          <label class="fld"><span>Send IPv6 pings from</span><div class="unit"><select id="f-src6"></select></div></label>
+          <label class="fld"><span>ICMP payload size</span><div class="unit"><input type="number" id="f-payload" min="1" max="65500"><i>bytes</i></div></label>
+          <label class="fld"><span>Time to live</span><div class="unit"><input type="number" id="f-ttl" min="1" max="255" placeholder="system"><i>hops</i></div></label>
+        </div>
+        <div class="checks">
+          <label class="chk"><input type="checkbox" id="f-df"><span>Do not fragment packets</span></label>
+          <label class="chk"><input type="checkbox" id="f-ipv6"><span>Prefer IPv6 when a name has both</span></label>
+          <label class="chk"><input type="checkbox" id="f-resolve"><span>Look names up again before every ping</span></label>
+          <label class="chk"><input type="checkbox" id="f-rdns"><span>Find host names for IP addresses</span></label>
+          <label class="chk"><input type="checkbox" id="f-mac"><span>Show MAC addresses of local hosts</span></label>
+        </div>
+      </section>
+
+      <section class="tabpane" data-pane="alerts">
+        <div class="fields">
+          <label class="fld"><span>A host is down after</span><div class="unit"><input type="number" id="f-failn" min="1" max="1000"><i>failed pings in a row</i></div></label>
+          <label class="fld"><span>It is up again after</span><div class="unit"><input type="number" id="f-upn" min="1" max="1000"><i>good pings in a row</i></div></label>
+        </div>
+        <label class="fld fld-wide"><span>Run this command when a host goes down</span><input type="text" id="f-cmddown" spellcheck="false" placeholder="for example: msg * %HostName% is down"></label>
+        <label class="fld fld-wide"><span>Run this command when it comes back</span><input type="text" id="f-cmdup" spellcheck="false"></label>
+        <p class="hint">Variables: %HostName% %IPAddress% %Description% %Group% %Status% %SucceedCount% %FailedCount% %ConsecutiveFailedCount% %LastPingTime%. The same values are passed as PINGTABLE_ environment variables.</p>
+        <p class="hint" id="cfg-path"></p>
+      </section>
+    </div>
+    <footer class="dlg-foot">
+      <span class="dlg-msg" id="settings-msg"></span>
+      <button type="button" class="btn" id="settings-cancel">CANCEL</button>
+      <button type="button" class="btn btn-primary" id="settings-apply">APPLY</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog class="dlg dlg-add" id="dlg-add">
+  <form method="dialog" class="dlg-form">
+    <header class="dlg-head"><h2>ADD HOSTS</h2></header>
+    <div class="dlg-body">
+      <textarea id="add-text" rows="3" spellcheck="false" autocomplete="off" wrap="off" aria-label="Hosts to add" placeholder="nas.lan  NAS in the closet"></textarea>
+      <p class="hint">A host name or address, then an optional description. One per line for several. Enter adds; Shift+Enter starts a new line.</p>
+      <div class="fields">
+        <label class="fld"><span>Put them in</span><div class="unit"><select id="add-group"></select></div></label>
+        <label class="fld" id="add-new-wrap" hidden><span>Name of the new group</span><div class="unit"><input type="text" id="add-new" spellcheck="false" autocomplete="off"></div></label>
+      </div>
+    </div>
+    <footer class="dlg-foot">
+      <span class="dlg-msg" id="add-msg"></span>
+      <button type="button" class="btn" id="add-close">CLOSE</button>
+      <button type="button" class="btn btn-primary" id="add-go">ADD</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog class="dlg dlg-small" id="dlg-keys">
+  <form method="dialog" class="dlg-form">
+    <header class="dlg-head"><h2>KEYBOARD</h2></header>
+    <div class="dlg-body keys">
+      <kbd>/</kbd><span>Filter hosts</span>
+      <kbd>&uarr;</kbd><kbd class="k2">&darr;</kbd><span>Move through the table</span>
+      <kbd>Enter</kbd><span>Open or close the detail panel</span>
+      <kbd>M</kbd><span>Mute or unmute the selected hosts</span>
+      <kbd>Ctrl</kbd><kbd class="k2">click</kbd><span>Select several hosts (Shift-click for a range)</span>
+      <kbd>S</kbd><span>Start or stop pinging</span>
+      <kbd>P</kbd><span>Ping every host once, now</span>
+      <kbd>Ctrl</kbd><kbd class="k2">C</kbd><span>Copy a summary of the selected hosts</span>
+      <kbd>Menu</kbd><span>Options for the selection (or right-click it)</span>
+      <kbd>A</kbd><span>Add hosts (or paste them with Ctrl+V)</span>
+      <kbd>Del</kbd><span>Remove the selected hosts from the list</span>
+      <kbd>H</kbd><span>Edit the whole host list</span>
+      <kbd>,</kbd><span>Settings</span>
+      <kbd>G</kbd><span>Group rows on or off</span>
+      <kbd>T</kbd><span>Dark or light</span>
+      <kbd>Esc</kbd><span>Close what is open</span>
+    </div>
+    <footer class="dlg-foot"><button class="btn btn-primary">CLOSE</button></footer>
+  </form>
+</dialog>
+
+<dialog class="dlg dlg-mid" id="dlg-measure">
+  <form method="dialog" class="dlg-form">
+    <header class="dlg-head"><h2>MEASURE</h2></header>
+    <div class="dlg-body">
+      <div id="measure-setup">
+        <p id="measure-who"></p>
+        <div class="fields">
+          <label class="fld"><span>For how long</span><div class="unit"><select id="m-duration">
+            <option value="10">10 seconds</option><option value="30">30 seconds</option><option value="60" selected>1 minute</option>
+            <option value="300">5 minutes</option><option value="900">15 minutes</option><option value="3600">1 hour</option>
+          </select></div></label>
+          <label class="fld"><span>How often</span><div class="unit"><select id="m-rate">
+            <option value="1">1 ping a second</option><option value="2">2 pings a second</option>
+            <option value="5" selected>5 pings a second</option><option value="10">10 pings a second</option>
+          </select></div></label>
+        </div>
+        <p class="hint">The chosen hosts are pinged at this rate for this long, whether or not regular pinging is on. Everything else carries on as it was. You can close this window; the measurement keeps running and the result waits here.</p>
+      </div>
+      <div id="measure-run" hidden>
+        <div class="measure-clock"><span id="m-clock">00:00</span><span id="m-clock-note"></span></div>
+        <div class="mtable m-measure" id="m-table"></div>
+      </div>
+    </div>
+    <footer class="dlg-foot">
+      <span class="dlg-msg" id="m-msg"></span>
+      <button type="button" class="btn" id="m-close">CLOSE</button>
+      <button type="button" class="btn" id="m-copy" hidden>COPY REPORT</button>
+      <button type="button" class="btn" id="m-stop" hidden>STOP</button>
+      <button type="button" class="btn btn-primary" id="m-start">START</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog class="dlg dlg-mid" id="dlg-trace">
+  <form method="dialog" class="dlg-form">
+    <header class="dlg-head"><h2 id="trace-title">ROUTE</h2></header>
+    <div class="dlg-body">
+      <p class="hint" id="trace-note"></p>
+      <div class="mtable m-trace" id="trace-table"></div>
+    </div>
+    <footer class="dlg-foot">
+      <span class="dlg-msg" id="trace-msg"></span>
+      <button type="button" class="btn" id="trace-again">AGAIN</button>
+      <button type="button" class="btn" id="trace-copy">COPY</button>
+      <button class="btn btn-primary">CLOSE</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog class="dlg dlg-small" id="dlg-about">
+  <form method="dialog" class="dlg-form">
+    <header class="dlg-head"><h2>ABOUT</h2></header>
+    <div class="dlg-body about">
+      <div class="about-mark"><span class="brand-mark" aria-hidden="true"></span><h3>PINGTABLE</h3></div>
+      <p class="about-version" id="about-version"></p>
+      <p>Ping many hosts and watch them in one table.</p>
+      <dl class="about-facts" id="about-facts"></dl>
+      <p class="hint" id="about-libs"></p>
+      <p class="hint about-disclaimer">pingtable is provided as is, without warranty of any kind. Use it only on networks and hosts you are allowed to test; you are responsible for the traffic it sends. It collects nothing and reports nothing to anyone.</p>
+    </div>
+    <footer class="dlg-foot"><button class="btn btn-primary">CLOSE</button></footer>
+  </form>
+</dialog>
+
+<dialog class="dlg dlg-small" id="dlg-confirm">
+  <form method="dialog" class="dlg-form">
+    <header class="dlg-head"><h2 id="confirm-title"></h2></header>
+    <div class="dlg-body"><p id="confirm-text"></p></div>
+    <footer class="dlg-foot">
+      <button class="btn" value="no">CANCEL</button>
+      <button class="btn btn-danger" value="yes" id="confirm-yes"></button>
+    </footer>
+  </form>
+</dialog>
+
+<section class="gate" id="gate" hidden>
+  <h2>OPEN THE LINK FROM PINGTABLE</h2>
+  <p>This page needs the access link pingtable prints when it starts. It looks like</p>
+  <pre>http://127.0.0.1:7464/?t=…</pre>
+  <p>Open that link once and this browser will remember it.</p>
+</section>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

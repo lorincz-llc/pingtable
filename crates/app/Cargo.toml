@@ -1,0 +1,25 @@
+[package]
+name = "pingtable"
+description = "Ping many hosts and watch them in one table"
+version.workspace = true
+authors.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+getrandom = "0.4.3"
+pingtable-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
+tiny_http = "0.12"
+
+[target."cfg(windows)".dependencies]
+tao = "0.37.2"
+windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+wry = "0.57.2"
+
+[build-dependencies]
+embed-resource = "3.0.12"
