@@ -363,6 +363,113 @@ unknown publisher when they are downloaded from the internet, and a policy that
 blocks unsigned programs will block them. The signing step is ready and waits
 for a signing account ([docs/signing.md](docs/signing.md)).
 
+## Signing: what to do
+
+A checklist for whoever makes the releases. Steps 1 to 5 are done once, in a
+browser. Steps 6 to 8 are done once on the build machine. After that every
+release is signed by the usual packaging command. Details and the full list of
+regions are in [docs/signing.md](docs/signing.md); Microsoft's side was checked
+on 17 Nov 2026 and may have changed.
+
+**Have these ready before you start**
+
+- A card for an Azure subscription. Signing costs about $9.99 a month.
+- The company's website, live, on a domain the company owns.
+- Mailboxes on that same domain. Microsoft writes to them during the check.
+- The company's business identifier (tax number or D-U-N-S number) and its
+  registered name and address, exactly as on the registration papers.
+- Your own government photo ID, for the identity check on a person.
+
+**Once, in the browser**
+
+1. **Open an Azure subscription** at [portal.azure.com](https://portal.azure.com)
+   if the company has none.
+2. **Create an Artifact Signing account.** Search the portal for "Artifact
+   Signing" (it may still be listed as "Trusted Signing"), create an account
+   on the Basic plan, and pick a region near you.
+   Write down the account name and the region's endpoint, for example
+   `eus.codesigning.azure.net` for East US.
+3. **Ask for identity validation** in that account: a new identity of the
+   Organization kind, Public Trust. Fill in the company details and answer
+   Microsoft's emails. This is the slow step: from a day to several weeks.
+   Microsoft's pages disagree on whether a company needs three years of
+   history, so a young company may be refused. If it is, see the fallback
+   below.
+4. **Create a certificate profile** of the Public Trust kind once the identity
+   shows as completed. Write down the profile name. The company name on it is
+   what Windows will show.
+5. **Give yourself the right to sign.** On the profile, assign the role
+   "Artifact Signing Certificate Profile Signer" to your own account, in the
+   portal under Access control, or with:
+
+   ```
+   az role assignment create --assignee <your object id> --role "Artifact Signing Certificate Profile Signer" --scope "/subscriptions/<subscription id>/resourceGroups/<resource group>/providers/Microsoft.CodeSigning/codeSigningAccounts/<account name>/certificateProfiles/<profile name>"
+   ```
+
+**Once, on the build machine**
+
+6. **Sign in with the Azure CLI:**
+
+   ```bash
+   az login
+   ```
+
+7. **Get jsign.** Download `jsign-7.6.jar` from
+   [its release page](https://github.com/ebourg/jsign/releases/tag/7.6) and
+   check it. It needs Java 8 or newer.
+
+   ```bash
+   sha256sum jsign-7.6.jar
+   ```
+
+   The answer should be
+   `6cf58aa080e7ff82656f320cff8d4a3bff30408df8766806dcba3740dd839fa5`.
+
+8. **Write `signing.env`** beside `Cargo.toml`, with the three names from
+   steps 2 and 4. Git ignores the file and it holds no secret.
+
+   ```
+   PINGTABLE_SIGN_ENDPOINT=eus.codesigning.azure.net
+   PINGTABLE_SIGN_ACCOUNT=<account name>
+   PINGTABLE_SIGN_PROFILE=<profile name>
+   JSIGN_JAR=/path/to/jsign-7.6.jar
+   ```
+
+   Add `JAVA=/path/to/java` if `java` is not on the PATH.
+
+**Every release**
+
+9. **Package as usual:**
+
+   ```bash
+   scripts/package-windows.sh
+   ```
+
+   It builds, signs, asks Windows whether each signature is valid, and stops
+   if one is not. The last lines should say `signed`, and the zip's readme and
+   the release notes then say so too.
+
+10. **Check by hand** whenever you like:
+
+    ```bash
+    scripts/sign-windows.sh --verify
+    ```
+
+    Each program should show `ok` and "signed by" the company's name.
+
+**After the first signed release**
+
+- Send the winget listing ([docs/winget.md](docs/winget.md)).
+- Expect the SmartScreen warning to fade over weeks, not at once: Windows
+  builds trust in a publisher as people download its programs.
+
+**If Microsoft refuses the company**
+
+Buy an ordinary organisation code signing certificate with a cloud-held key
+instead, for example from SSL.com with its eSigner service, at about $309 a
+year. `scripts/sign-windows.sh` would need its jsign options changed for that
+service; the rest stays the same.
+
 ## Security and privacy
 
 - pingtable talks only to the hosts in your list and to your system's name
