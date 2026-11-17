@@ -29,6 +29,11 @@ HOSTS
   example.com:443  [2001:db8::1]:22  https://x.y  TCP connect
   10.0.0.1-10.0.0.20  10.0.0.0/24                 IPv4 range, CIDR block
   host every=5s timeout=300ms tag=lan             per-host options
+
+pingtable is provided as is, without warranty of any kind, and you use it at
+your own risk. Use it only on networks and hosts you are allowed to test.
+Apache License 2.0. Full terms: LICENSE and DISCLAIMER beside the program, or
+https://github.com/lorincz-llc/pingtable
 ";
 
 #[derive(Default)]

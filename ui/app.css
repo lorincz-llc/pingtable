@@ -395,6 +395,8 @@ button { cursor: pointer; }
 .about-mark .brand-mark { width: 26px; height: 26px; }
 .about-version { color: var(--dim); }
 .about-disclaimer { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.about-disclaimer a { color: var(--accent); text-underline-offset: 3px; white-space: nowrap; }
+.about-disclaimer a:hover { color: var(--text); }
 .about-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 16px; margin: 16px 0; font-size: 12px; }
 .about-facts dt { color: var(--dim); white-space: nowrap; }
 .about-facts dd { margin: 0; overflow-wrap: anywhere; user-select: text; }

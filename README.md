@@ -211,6 +211,13 @@ scripts/build-windows.sh
 | `WebView2Loader.dll` | Microsoft's loader for the window; keep it beside `pingtable.exe` |
 | `pingtable-cli.exe` | the console program (`serve`, `once`) |
 
+To make the zip for a release, with the license, notices and disclaimer
+inside and the notes for the release page beside it:
+
+```bash
+scripts/package-windows.sh
+```
+
 The window needs the Microsoft Edge WebView2 Runtime, which Windows 11 includes.
 Without it, pingtable opens in the default browser instead. A `pingtable.json`
 beside the exe makes the folder portable; otherwise settings live in
@@ -235,14 +242,28 @@ unsigned programs will block them.
   (`%HostName%` and the rest) are reduced to plain characters first, so text
   from an imported file cannot add commands of its own.
 - Please report a security problem privately to pingtable@lorincz.llc rather
-  than in a public issue.
+  than in a public issue. More in [SECURITY.md](SECURITY.md).
 
 ## Disclaimer
 
 pingtable is provided "as is", without warranty of any kind, express or
-implied. Use it only on networks and hosts you are authorised to test. You are
-responsible for the traffic it sends and for complying with the policies and
-laws that apply to you. See sections 7 and 8 of the license for the full terms.
+implied, and its authors and contributors accept no liability for any damage
+or loss that comes from using it. You use it at your own risk.
+
+Use it only on networks and hosts you own or are authorised to test. You are
+responsible for the traffic it sends, for the commands it runs for you, and
+for complying with the policies and laws that apply to you. It is not meant
+for any use where a failure or a wrong reading could cause harm.
+
+The full text is in [DISCLAIMER.md](DISCLAIMER.md). It restates sections 7 and
+8 of the [license](LICENSE), which govern.
+
+## Contributing
+
+pingtable is open source and under active development. Each release is listed
+in [CHANGELOG.md](CHANGELOG.md). Bug reports and ideas are welcome as
+[issues](https://github.com/lorincz-llc/pingtable/issues); read
+[CONTRIBUTING.md](CONTRIBUTING.md) before sending a pull request.
 
 ## License
 
