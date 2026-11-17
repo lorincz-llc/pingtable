@@ -47,6 +47,7 @@
     </label>
     <button class="btn btn-primary" id="btn-toggle" title="Start or stop the regular pinging (S)">START</button>
     <button class="btn" id="btn-add" title="Add hosts (A)">+ ADD</button>
+    <button class="btn" id="btn-ports" title="Port check: is anything listening on a host's TCP ports? (O)">PORTS</button>
     <button class="btn btn-icon" id="btn-settings" title="Settings (,)" aria-label="Settings">
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="9" y="2" width="3" height="4" fill="currentColor"/><rect x="4" y="6" width="3" height="4" fill="currentColor"/><rect x="10" y="10" width="3" height="4" fill="currentColor"/></svg>
     </button>
@@ -66,6 +67,8 @@
         <button class="menu-item" id="mi-sound"><span class="check"></span>Sound on down / up</button>
         <div class="menu-head">Hosts</div>
         <button class="menu-item" id="mi-add">Add hosts…<span class="hint">A</span></button>
+        <button class="menu-item" id="mi-import">Import hosts from a file…</button>
+        <button class="menu-item" id="mi-ports">Check ports on a host…<span class="hint">O</span></button>
         <button class="menu-item" id="mi-list">Edit the host list…<span class="hint">H</span></button>
         <button class="menu-item" id="mi-settings">Settings…<span class="hint">,</span></button>
         <div class="menu-head">Export</div>
@@ -94,13 +97,14 @@
 
   <section class="empty" id="empty" hidden>
     <h2>NO HOSTS YET</h2>
-    <p>Type the machines you want to watch, one per line or separated by spaces.</p>
+    <p>Type the machines you want to watch, one per line or separated by spaces. Put a port after a host, like <b>:443</b>, to check that something is listening there.</p>
     <pre>192.168.1.1
 nas.lan every=5s
 example.com:443
 10.0.0.0/24</pre>
     <div class="empty-actions">
       <button class="btn btn-primary" id="btn-empty-add">ADD HOSTS</button>
+      <button class="btn" id="btn-empty-import" title="Add hosts from a CSV or text file">IMPORT A FILE…</button>
       <button class="btn" id="btn-empty-example">USE THE EXAMPLE HOSTS</button>
     </div>
   </section>
@@ -146,6 +150,7 @@ example.com:443
 <div class="menu ctx" id="ctx" hidden role="menu"></div>
 
 <div class="toasts" id="toasts" aria-live="assertive"></div>
+<input type="file" id="f-import-any" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
 
 <dialog class="dlg" id="dlg-hosts">
   <form method="dialog" class="dlg-form" id="hosts-form">
@@ -167,7 +172,7 @@ example.com:443
           <h3>What you can type</h3>
           <dl>
             <dt>nas.lan&ensp;192.168.1.10</dt><dd>ICMP ping</dd>
-            <dt>example.com:443</dt><dd>TCP connect to a port</dd>
+            <dt>example.com:443</dt><dd>TCP: is that port listening?</dd>
             <dt>https://example.com</dt><dd>TCP 443 (http is 80)</dd>
             <dt>[2001:db8::1]:22</dt><dd>IPv6 with a port</dd>
             <dt>10.0.0.1-10.0.0.20</dt><dd>every address in a range</dd>
@@ -269,6 +274,12 @@ example.com:443
     <div class="dlg-body">
       <textarea id="add-text" rows="3" spellcheck="false" autocomplete="off" wrap="off" aria-label="Hosts to add" placeholder="nas.lan  NAS in the closet"></textarea>
       <p class="hint">A host name or address, then an optional description. One per line for several. Enter adds; Shift+Enter starts a new line.</p>
+      <div class="pick">
+        <span class="pick-l">Check with</span>
+        <div class="chips" id="add-chips"></div>
+        <input type="text" class="chip-input" id="add-ports" spellcheck="false" autocomplete="off" placeholder="other ports" aria-label="Other TCP ports" title="Other TCP ports, for example 8080 or 9000-9005">
+      </div>
+      <p class="hint">PING asks whether the host is there. A port opens a TCP connection to it and closes it again, which shows whether something is listening on that port. Each choice gets its own row.</p>
       <div class="fields">
         <label class="fld"><span>Put them in</span><div class="unit"><select id="add-group"></select></div></label>
         <label class="fld" id="add-new-wrap" hidden><span>Name of the new group</span><div class="unit"><input type="text" id="add-new" spellcheck="false" autocomplete="off"></div></label>
@@ -276,6 +287,7 @@ example.com:443
     </div>
     <footer class="dlg-foot">
       <span class="dlg-msg" id="add-msg"></span>
+      <button type="button" class="btn" id="add-import" title="Add many hosts from a CSV or text file. You can also drop a file anywhere on the window.">IMPORT A FILE…</button>
       <button type="button" class="btn" id="add-close">CLOSE</button>
       <button type="button" class="btn btn-primary" id="add-go">ADD</button>
     </footer>
@@ -296,6 +308,7 @@ example.com:443
       <kbd>Ctrl</kbd><kbd class="k2">C</kbd><span>Copy a summary of the selected hosts</span>
       <kbd>Menu</kbd><span>Options for the selection (or right-click it)</span>
       <kbd>A</kbd><span>Add hosts (or paste them with Ctrl+V)</span>
+      <kbd>O</kbd><span>Port check: which TCP ports answer on a host</span>
       <kbd>Del</kbd><span>Remove the selected hosts from the list</span>
       <kbd>H</kbd><span>Edit the whole host list</span>
       <kbd>,</kbd><span>Settings</span>
@@ -352,6 +365,29 @@ example.com:443
       <button type="button" class="btn" id="trace-again">AGAIN</button>
       <button type="button" class="btn" id="trace-copy">COPY</button>
       <button class="btn btn-primary">CLOSE</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog class="dlg dlg-ports" id="dlg-ports">
+  <form method="dialog" class="dlg-form">
+    <header class="dlg-head"><h2>PORT CHECK</h2></header>
+    <div class="dlg-body">
+      <label class="fld fld-wide"><span>Host</span><input type="text" id="pc-host" spellcheck="false" autocomplete="off" placeholder="example.com or 192.168.1.10"></label>
+      <div class="pick">
+        <span class="pick-l">Ports</span>
+        <div class="chips" id="pc-chips"></div>
+        <input type="text" class="chip-input" id="pc-ports" spellcheck="false" autocomplete="off" placeholder="other ports" aria-label="Other TCP ports" title="Other TCP ports, for example 8080 or 9000-9005">
+      </div>
+      <p class="hint" id="pc-note"></p>
+      <div class="mtable m-ports" id="pc-table"></div>
+    </div>
+    <footer class="dlg-foot">
+      <span class="dlg-msg" id="pc-msg"></span>
+      <button type="button" class="btn" id="pc-close">CLOSE</button>
+      <button type="button" class="btn" id="pc-copy" hidden>COPY</button>
+      <button type="button" class="btn" id="pc-watch" hidden title="Add a row for each of these ports, so they are checked all the time">WATCH IN THE TABLE</button>
+      <button type="button" class="btn btn-primary" id="pc-go">CHECK</button>
     </footer>
   </form>
 </dialog>

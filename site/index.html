@@ -4,8 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<meta name="robots" content="noindex, nofollow, noarchive">
-<meta name="description" content="pingtable pings many hosts and shows them in one table. A small Windows app written in Rust. No installer, no administrator rights.">
+<meta name="description" content="pingtable pings many hosts, shows them in one table, and checks whether TCP ports are listening. A small Windows app written in Rust. No installer, no administrator rights.">
 <title>pingtable: ping many hosts, watch them in one table</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/styles.css">
@@ -28,12 +27,12 @@
 <main>
   <section class="hero">
     <h1>PING MANY HOSTS.<br>WATCH THEM IN ONE TABLE.</h1>
-    <p class="lead">pingtable is a small Windows app that pings every machine you care about, once a second, and shows who is answering, how fast, and who just stopped.</p>
+    <p class="lead">pingtable is a small Windows app that pings every machine you care about, once a second, and shows who is answering, how fast, and who just stopped. It also tells you whether a port is listening: is 443 open, is SSH up?</p>
     <p class="actions">
       <a class="btn primary" href="https://github.com/lorincz-llc/pingtable/releases/latest">DOWNLOAD FOR WINDOWS</a>
       <a class="btn" href="https://github.com/lorincz-llc/pingtable">SOURCE ON GITHUB</a>
     </p>
-    <p class="fine">Windows 10 and 11, 64-bit · 1.5 MB · no installer, no administrator rights · free and open source</p>
+    <p class="fine">Windows 10 and 11, 64-bit · 1.6 MB · no installer, no administrator rights · free and open source</p>
   </section>
 
   <section class="demo" aria-label="What the table looks like">
@@ -64,13 +63,39 @@
     <h2>WHAT IT DOES</h2>
     <div class="features">
         <article class="feature"><h3>One table</h3><p>Every host on one screen: state, last and average round trip, a trend of the last 60 pings, loss, IP address and name.</p></article>
-        <article class="feature"><h3>ICMP and TCP</h3><p>Ping by ICMP over IPv4 and IPv6, or check that a TCP port answers. Ranges and CIDR blocks expand into hosts.</p></article>
-        <article class="feature"><h3>Add hosts fast</h3><p>Type a host and a description and press Enter. Paste a list. Drop a CSV file from another ping tool onto the window.</p></article>
+        <article class="feature"><h3>Port check</h3><p>Is anything listening? Pick 22, 80, 443, 3389 or any port and see in seconds: open, closed, or no answer. One click keeps watching it.</p></article>
+        <article class="feature"><h3>Add hosts fast</h3><p>Type a host, choose ping or ports, press Enter. Paste a list. Import a CSV file from another ping tool, or drop it on the window.</p></article>
         <article class="feature"><h3>Act on a selection</h3><p>Right-click one host or many: mute, ping now, ping only these, measure, trace the route, copy a summary.</p></article>
         <article class="feature"><h3>Measure</h3><p>Ping chosen hosts up to ten times a second for a set time and get loss, median, 95th percentile and jitter.</p></article>
         <article class="feature"><h3>Trace route</h3><p>See the routers between you and a host, with names, in about a second.</p></article>
         <article class="feature"><h3>Alerts</h3><p>A host is down after a number of failed pings you choose. Get a notice, a sound, or run your own command.</p></article>
-        <article class="feature"><h3>Yours to script</h3><p>Everything the window does goes through a small local API, so a script can do it too.</p></article>
+        <article class="feature"><h3>Yours to script</h3><p>A command-line program comes in the same zip, and everything the window does goes through a small local API.</p></article>
+    </div>
+  </section>
+
+  <section id="cli" class="block two">
+    <div>
+      <h2>FROM THE COMMAND LINE</h2>
+      <p class="about">The zip also holds <b>pingtable-cli.exe</b>: the same program without the window. Use it for one quick answer, in a script, or in a scheduled task. It needs no administrator rights.</p>
+      <pre class="term">&gt; pingtable-cli ports example.com 22 80 443
+example.com (93.184.215.14): 2 of 3 ports open
+   22  SSH              no answer
+   80  HTTP             open          12.6 ms
+  443  HTTPS            open          12.9 ms
+
+&gt; pingtable-cli once 192.168.1.1 example.com:443
+HOST         CHECK    STATE  TIME ms
+192.168.1.1  icmp     UP        0.41
+example.com  tcp:443  UP       12.80</pre>
+    </div>
+    <div>
+      <h2>WHAT A PORT CHECK SAYS</h2>
+      <ul class="plain">
+        <li><b>Open.</b> The connection opened: something is listening.</li>
+        <li><b>Closed.</b> The host answered and refused: it is up, nothing listens there.</li>
+        <li><b>No answer.</b> Nothing came back: a firewall dropped it, or the host is off.</li>
+        <li><b>Nothing is sent.</b> The connection is closed the moment it opens.</li>
+      </ul>
     </div>
   </section>
 
@@ -87,9 +112,9 @@
     <div id="download">
       <h2>DOWNLOAD</h2>
       <ol class="plain steps">
-        <li>Get the zip from the <a href="https://github.com/lorincz-llc/pingtable/releases/latest">latest release</a>.</li>
-        <li>Unpack it anywhere.</li>
-        <li>Double-click <b>pingtable.exe</b>.</li>
+        <li><span>Get the zip from the <a href="https://github.com/lorincz-llc/pingtable/releases/latest">latest release</a>.</span></li>
+        <li><span>Unpack it anywhere.</span></li>
+        <li><span>Double-click <b>pingtable.exe</b>. For a terminal, use <b>pingtable-cli.exe</b> beside it.</span></li>
       </ol>
       <p class="fine">The program is not code-signed yet, so Windows may show an “unknown publisher” warning the first time. Each release lists the SHA-256 of its zip.</p>
     </div>

@@ -1,0 +1,36 @@
+<!doctype html>
+<!--
+  Source of brand/github/social-preview.png, the image GitHub shows when the
+  repository link is shared (repository Settings, Social preview).
+  The square is the app icon (ui/icon.svg); the type follows brand/theme.json.
+  Render at exactly 1280 x 640 with any Chromium, for example:
+    chrome --headless --hide-scrollbars --window-size=1280,640 \
+           --screenshot=social-preview.png social-preview.html
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>pingtable</title>
+<style>
+  html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; background: #fff; }
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 44px;
+    box-sizing: border-box; border: 12px solid #000; color: #000;
+  }
+  .brand { display: flex; align-items: center; gap: 44px; }
+  .mark { width: 132px; height: 132px; background: #1596a6; }
+  .word {
+    font-family: "Archivo Black", "Inter Tight", "Segoe UI Variable Display", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 900; font-size: 132px; line-height: 1; letter-spacing: .02em;
+  }
+  .line {
+    font-family: "JetBrains Mono", "Cascadia Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
+    font-size: 27px; letter-spacing: .16em; color: #555;
+  }
+</style>
+</head>
+<body>
+  <div class="brand"><span class="mark"></span><span class="word">PINGTABLE</span></div>
+  <div class="line">PING MANY HOSTS. WATCH THEM IN ONE TABLE.</div>
+</body>
+</html>

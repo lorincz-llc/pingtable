@@ -1,7 +1,9 @@
-//! The command line: `pingtable [serve]` and `pingtable once`.
+//! The command line: `pingtable [serve]`, `pingtable once` and `pingtable ports`.
 
 use crate::{config, server};
-use pingtable_core::{export, Engine, Settings};
+use pingtable_core::probe::ProbeParams;
+use pingtable_core::{export, netinfo, portcheck, Engine, Settings};
+use serde_json::json;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -9,26 +11,46 @@ use std::time::Duration;
 const HELP: &str = "\
 pingtable - ping many hosts and watch them in one table
 
+This is the command-line program (pingtable-cli.exe on Windows). The app in
+its own window is pingtable.exe; both use the same settings and host list.
+
 USAGE
   pingtable [serve] [OPTIONS]          run the local web UI (default)
   pingtable once [OPTIONS] [HOST...]   ping every host once and print the result
+  pingtable ports [OPTIONS] HOST [PORT...]
+                                       check which TCP ports answer on one host
 
 OPTIONS
   --config FILE     use this config file
   --port N          port for the web UI (default 7464)
   --no-open         do not open the browser
   --hosts FILE      once: read the host list from a file
-  --format F        once: table (default), json or csv
-  --timeout MS      once: per-probe timeout in milliseconds
+  --format F        once: table (default), json or csv; ports: table or json
+  --timeout MS      once, ports: per-probe timeout in milliseconds
+                    (ports waits 3000 unless told otherwise)
   --described       once: host list is one \"address description\" per line
   -h, --help        show this help
   -V, --version     show the version
 
 HOSTS
   example.com  192.168.1.10  2001:db8::1          ICMP ping
-  example.com:443  [2001:db8::1]:22  https://x.y  TCP connect
+  example.com:443  [2001:db8::1]:22  https://x.y  TCP connect: is the port listening?
   10.0.0.1-10.0.0.20  10.0.0.0/24                 IPv4 range, CIDR block
   host every=5s timeout=300ms tag=lan             per-host options
+
+PORTS
+  pingtable ports example.com               the usual ports (22, 80, 443, 3389 ...)
+  pingtable ports example.com 22 443        these ports
+  pingtable ports 192.168.1.10 8000-8010    a short range (64 ports at most)
+  One TCP connection is opened to each port and closed again; nothing is sent.
+  open: something is listening.  closed: the host answered and refused.
+  no answer: a firewall dropped it, or the host is off.
+  Windows takes about two seconds to report a refusal, so with a timeout
+  under 2500 a closed port can show as no answer.
+
+EXIT STATUS
+  once, ports: 0 when every host is up or every port is open, 1 when not,
+  2 when the command could not be understood.
 
 pingtable is provided as is, without warranty of any kind, and you use it at
 your own risk. Use it only on networks and hosts you are allowed to test.
@@ -72,7 +94,7 @@ fn parse_args() -> Result<Args, String> {
                 args.timeout_ms = Some(value("--timeout")?.parse().map_err(|_| "--timeout needs a number".to_string())?)
             }
             "--described" => args.described = true,
-            "serve" | "once" if args.command.is_none() && args.hosts.is_empty() => args.command = Some(arg),
+            "serve" | "once" | "ports" if args.command.is_none() && args.hosts.is_empty() => args.command = Some(arg),
             other if other.starts_with("--") => return Err(format!("unknown option {other}")),
             _ => args.hosts.push(arg),
         }
@@ -91,6 +113,7 @@ pub fn main() -> ExitCode {
     };
     match args.command.as_deref() {
         Some("once") => once(args),
+        Some("ports") => ports(args),
         _ => serve(args),
     }
 }
@@ -188,6 +211,64 @@ fn once(args: Args) -> ExitCode {
         }
     }
     if snapshot.hosts.iter().all(|h| h.state == "up") {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+/// `pingtable ports HOST [PORT...]`: try a few TCP ports of one host, once.
+fn ports(args: Args) -> ExitCode {
+    let usage = |why: &str| {
+        eprintln!("pingtable: {why}\nTry: pingtable ports example.com 22 443");
+        ExitCode::from(2)
+    };
+    let Some((first, rest)) = args.hosts.split_first() else {
+        return usage("no host given");
+    };
+    let (host, addr, named) = match portcheck::split_target(first) {
+        Ok(target) => target,
+        Err(why) => return usage(&why),
+    };
+    let mut wanted: Vec<u16> = named.into_iter().collect();
+    match portcheck::parse_ports(&rest.join(" ")) {
+        Ok(more) => wanted.extend(more.into_iter().filter(|port| Some(*port) != named)),
+        Err(why) => return usage(&why),
+    }
+    if wanted.is_empty() {
+        wanted = portcheck::COMMON_PORTS.to_vec();
+    }
+    if wanted.len() > portcheck::MAX_PORTS {
+        return usage(&format!("that is more than {} ports", portcheck::MAX_PORTS));
+    }
+    let format = args.format.as_deref().unwrap_or("table");
+    if format != "table" && format != "json" {
+        return usage(&format!("unknown format \"{format}\" (use table or json)"));
+    }
+
+    let settings = Settings::default();
+    let Some(target) = addr.or_else(|| netinfo::resolve(&host, settings.prefer_ipv6)) else {
+        eprintln!("pingtable: the name {host} does not resolve");
+        return ExitCode::from(1);
+    };
+    let timeout_ms = args.timeout_ms.unwrap_or(portcheck::MIN_TIMEOUT_MS).clamp(50, 60_000);
+    let params = ProbeParams { timeout: Duration::from_millis(timeout_ms as u64), ..ProbeParams::default() };
+    let results = portcheck::check(target, &wanted, &params);
+    let open = results.iter().filter(|r| r.state == portcheck::PortState::Open).count();
+
+    if format == "json" {
+        let doc = json!({ "schema_version": 1, "host": host, "target": target, "timeout_ms": timeout_ms, "open": open, "results": results });
+        println!("{}", serde_json::to_string_pretty(&doc).unwrap_or_default());
+    } else {
+        let shown = if host == target.to_string() { host.clone() } else { format!("{host} ({target})") };
+        println!("{shown}: {open} of {} {} open", results.len(), if results.len() == 1 { "port" } else { "ports" });
+        for r in &results {
+            let time = r.rtt_us.map(|us| format!("{:.1} ms", us as f64 / 1000.0)).unwrap_or_default();
+            let line = format!("{:>5}  {:<16} {:<10} {:>10}", r.port, r.service.unwrap_or(""), r.state.label(), time);
+            println!("{}", line.trim_end());
+        }
+    }
+    if open == results.len() {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)

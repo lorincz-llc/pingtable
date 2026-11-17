@@ -1549,7 +1549,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pingtable"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "embed-resource",
  "getrandom",
@@ -1564,7 +1564,7 @@ dependencies = [
 
 [[package]]
 name = "pingtable-core"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "dns-lookup",
  "if-addrs",

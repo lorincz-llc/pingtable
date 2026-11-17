@@ -11,7 +11,8 @@
 
 use crate::config::{self, Config};
 use pingtable_core::parse::{parse_host_list, ParseOptions};
-use pingtable_core::{export, hostlist, netinfo, trace, Engine, Settings};
+use pingtable_core::probe::ProbeParams;
+use pingtable_core::{export, hostlist, netinfo, portcheck, trace, Engine, Settings};
 use serde::Deserialize;
 use serde_json::json;
 use std::io::Read;
@@ -185,6 +186,8 @@ fn add_hosts(ctx: &Ctx, body: &AddBody) -> Result<serde_json::Value, String> {
     if entries.is_empty() {
         return Err("Type a host name or an address.".into());
     }
+    let ports = chosen_ports(&body.ports, None, &body.ports_text)?;
+    let entries: Vec<String> = entries.iter().flat_map(|e| portcheck::entries_for_ports(e, &ports, body.ping)).collect();
     let (mut settings, mut text) = ctx.engine.config();
     // A description needs the one-host-per-line form; switch the list to it when one is given.
     let has_description = entries.iter().any(|e| e.split(' ').skip(1).any(|w| !w.contains('=')));
@@ -215,6 +218,66 @@ fn add_hosts(ctx: &Ctx, body: &AddBody) -> Result<serde_json::Value, String> {
     let new_text = hostlist::add_entries(&text, group, &entries);
     let (_, saved) = apply_and_save(ctx, settings, &new_text, true, None);
     Ok(json!({ "ok": true, "added": added, "group": group, "save_error": saved }))
+}
+
+/// The ports a request asks for, from every place it can name them, without
+/// repeats and within the limit of one check.
+fn chosen_ports(listed: &[u16], named: Option<u16>, typed: &str) -> Result<Vec<u16>, String> {
+    let mut ports: Vec<u16> = Vec::new();
+    for port in named.into_iter().chain(listed.iter().copied()).chain(portcheck::parse_ports(typed)?) {
+        if port == 0 {
+            return Err("0 is not a port number (1 to 65535).".into());
+        }
+        if !ports.contains(&port) {
+            ports.push(port);
+        }
+    }
+    if ports.len() > portcheck::MAX_PORTS {
+        return Err(format!("That is more than {} ports. Choose fewer at a time.", portcheck::MAX_PORTS));
+    }
+    Ok(ports)
+}
+
+/// Try a few TCP ports of one host, once, and reply with what answered.
+/// Nothing is added to the table and no counter changes.
+fn port_check(ctx: &Ctx, request: Request, body: &PortCheckBody) {
+    let (host, addr, named) = match portcheck::split_target(&body.host) {
+        Ok(target) => target,
+        Err(why) => return reply_error(request, 400, &why),
+    };
+    let ports = match chosen_ports(&body.ports, named, &body.ports_text) {
+        Ok(ports) if ports.is_empty() => return reply_error(request, 400, "Choose at least one port."),
+        Ok(ports) => ports,
+        Err(why) => return reply_error(request, 400, &why),
+    };
+    let (settings, _) = ctx.engine.config();
+    let Some(target) = addr.or_else(|| netinfo::resolve(&host, settings.prefer_ipv6)) else {
+        return reply_error(request, 409, &format!("The name {host} does not resolve, so there is nothing to check."));
+    };
+    // Long enough for Windows to report a refusal, whatever the ping timeout is.
+    let timeout_ms = settings.timeout_ms.clamp(portcheck::MIN_TIMEOUT_MS, 10_000);
+    let params = ProbeParams {
+        timeout: Duration::from_millis(timeout_ms as u64),
+        source_v4: settings.source_v4,
+        source_v6: settings.source_v6,
+        ..ProbeParams::default()
+    };
+    let results = portcheck::check(target, &ports, &params);
+    reply_json(
+        request,
+        200,
+        &json!({
+            "schema_version": 1,
+            "host": host,
+            "target": target,
+            "from": netinfo::local_name(),
+            "source": netinfo::source_for(target),
+            "timeout_ms": timeout_ms,
+            "checked_at_ms": pingtable_core::now_ms(),
+            "open": results.iter().filter(|r| r.state == portcheck::PortState::Open).count(),
+            "results": results,
+        }),
+    );
 }
 
 /// Trace the route to one host and reply with the hops.
@@ -408,6 +471,28 @@ struct AddBody {
     entries: Vec<String>,
     /// Existing or new group name; none adds the hosts ungrouped.
     group: Option<String>,
+    /// TCP ports to watch on every entry that names no port of its own: one
+    /// row for each. Empty adds the entries as typed.
+    #[serde(default)]
+    ports: Vec<u16>,
+    /// More ports as a person types them: `8080 9000-9005`.
+    #[serde(default)]
+    ports_text: String,
+    /// With ports: keep the plain ping row as well.
+    #[serde(default)]
+    ping: bool,
+}
+
+/// Body of `POST /api/v1/portcheck`.
+#[derive(Deserialize)]
+struct PortCheckBody {
+    /// One host name or address. A port or scheme in it is checked too.
+    host: String,
+    #[serde(default)]
+    ports: Vec<u16>,
+    /// More ports as a person types them: `22, 80 443`, `8000-8010`.
+    #[serde(default)]
+    ports_text: String,
 }
 
 #[derive(Deserialize)]
@@ -494,6 +579,14 @@ fn api(ctx: &Ctx, mut request: Request, path: &str, query: &str) {
                 Ok(reply) => reply_json(request, 200, &reply),
                 Err(why) => reply_error(request, 400, &why),
             }
+        }
+
+        (Method::Post, "/api/v1/portcheck") => {
+            let body: PortCheckBody = match read_json(&mut request) {
+                Ok(body) => body,
+                Err(why) => return reply_error(request, 400, &why),
+            };
+            port_check(ctx, request, &body);
         }
 
         (Method::Post, "/api/v1/import") => {
@@ -737,5 +830,20 @@ fn api(ctx: &Ctx, mut request: Request, path: &str, query: &str) {
         }
 
         _ => reply_error(request, 404, "Not found."),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ports_are_gathered_from_every_place_once() {
+        assert_eq!(chosen_ports(&[443, 22], Some(8443), "22 9000-9001").unwrap(), [8443, 443, 22, 9000, 9001]);
+        assert!(chosen_ports(&[], None, "").unwrap().is_empty());
+        assert!(chosen_ports(&[0], None, "").unwrap_err().contains("not a port number"));
+        assert!(chosen_ports(&[], None, "https").unwrap_err().contains("not a port number"));
+        let many: Vec<u16> = (1..=65).collect();
+        assert!(chosen_ports(&many, None, "").unwrap_err().contains("more than 64"));
     }
 }

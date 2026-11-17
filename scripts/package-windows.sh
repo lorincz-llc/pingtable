@@ -45,11 +45,32 @@ Start it
 What is here
   pingtable.exe        the app, in its own window
   WebView2Loader.dll   Microsoft's loader for that window
-  pingtable-cli.exe    the same program for the command line and the browser
-                       (run "pingtable-cli --help")
+  pingtable-cli.exe    the same program without the window, for a terminal
   LICENSE.txt          Apache License 2.0
   DISCLAIMER.txt       no warranty, no liability, your responsibilities
   NOTICE.txt, THIRD-PARTY-NOTICES.md
+
+The command line
+  pingtable-cli.exe does the same work without a window. It suits a quick
+  answer, a script or a scheduled task. Open a terminal in this folder (in
+  File Explorer, type cmd in the address bar and press Enter), then:
+
+    pingtable-cli once 192.168.1.1 example.com:443
+        ping each host one time, print the result and exit
+
+    pingtable-cli ports example.com 22 80 443
+        check which TCP ports are listening on one host:
+        open, closed (refused) or no answer
+
+    pingtable-cli
+        run without the window and show the table in your browser
+
+    pingtable-cli --help
+        every command and option
+
+  "once" and "ports" end with status 0 only when every host answered or
+  every port was open, so a script can act on the result. Add --format json
+  for output a program can read.
 
 Good to know
   The programs are not code-signed yet, so Windows may show an "unknown

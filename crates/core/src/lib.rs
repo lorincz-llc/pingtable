@@ -4,6 +4,7 @@
 //! * [`probe`] sends one ICMP echo or one TCP connect and reports the outcome.
 //! * [`engine`] schedules rounds of probes and keeps per-host statistics.
 //! * [`export`] renders the current table as JSON or CSV.
+//! * [`portcheck`] tries a few TCP ports of one host, once, on request.
 
 pub mod engine;
 pub mod export;
@@ -11,6 +12,7 @@ pub mod hostlist;
 pub mod model;
 pub mod netinfo;
 pub mod parse;
+pub mod portcheck;
 pub mod probe;
 pub mod trace;
 

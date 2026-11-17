@@ -227,6 +227,7 @@ button { cursor: pointer; }
 .td.dim { color: var(--dim); }
 .tr.is-off .td.dim { color: var(--faint); }
 .c-host { font-weight: 700; }
+.c-host .port { font-weight: 400; color: var(--accent); }
 .c-state { display: grid; place-items: center; padding: 0; line-height: 0; }
 .none { color: var(--faint); }
 
@@ -501,6 +502,7 @@ kbd { display: inline-block; min-width: 26px; padding: 2px 6px; border: 1px soli
   .detail-head { flex-wrap: wrap; }
   .d-meta { flex-basis: 100%; }
   #foot-rate, #foot-ver, #foot-flight { display: none; }
+  #btn-ports { display: none; } /* still in the menu and on right-click */
   .foot-item { padding: 0 8px; }
 }
 
@@ -515,6 +517,24 @@ kbd { display: inline-block; min-width: 26px; padding: 2px 6px; border: 1px soli
 #add-text { width: 100%; min-height: 76px; resize: vertical; padding: 10px 12px; background: var(--surface); border: 1px solid var(--rule); border-radius: 0; line-height: 1.55; font-size: 14px; }
 #add-text:focus { outline: 0; border-color: var(--accent); }
 .dlg-add .fields { margin: 14px 0 0; }
+
+/* Choices of check: PING and TCP ports, as toggle buttons. */
+.dlg-ports { width: min(680px, calc(100vw - 32px)); }
+.pick { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 12px 0 8px; }
+.pick-l { font-size: 11px; letter-spacing: .06em; color: var(--dim); margin-right: 6px; }
+.chips { display: contents; }
+.chip { height: 28px; padding: 0 10px; background: var(--bg); border: 1px solid var(--rule-strong); border-radius: 0; font-size: 12px; white-space: nowrap; }
+.chip i { font-style: normal; font-size: 11px; color: var(--dim); margin-left: 6px; }
+.chip:hover { background: var(--raised); }
+.chip.is-on { background: var(--accent-block); border-color: var(--accent-block); color: var(--on-accent); }
+.chip.is-on i { color: inherit; opacity: .8; }
+.chip-input { height: 28px; width: 140px; padding: 0 8px; background: var(--surface); border: 1px solid var(--rule); border-radius: 0; font-size: 12px; }
+.chip-input:focus { outline: 0; border-color: var(--accent); }
+.m-ports { grid-template-columns: 70px minmax(110px, 1fr) minmax(150px, 1.3fr) 80px; margin-top: 12px; }
+.m-ports:empty { display: none; }
+.m-ports .open { color: var(--accent); font-weight: 700; }
+.m-ports .closed, .m-ports .failed { color: var(--down); }
+.m-ports .no_answer { color: var(--warn); }
 .hint b { color: var(--text); font-weight: 400; }
 
 /* dragging a column heading to a new place */

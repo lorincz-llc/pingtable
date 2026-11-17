@@ -142,6 +142,9 @@ main { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
 .plain { margin: 0; padding: 0; list-style: none; }
 .plain li { padding: 14px 0; border-bottom: 1px solid var(--rule); color: var(--dim); }
 .plain b { color: var(--text); }
+.about { margin: 14px 0 0; color: var(--dim); }
+.about b { color: var(--text); }
+.term { margin: 14px 0 0; padding: 14px 16px; border-left: 4px solid var(--accent); background: var(--surface); color: var(--text); font: 12.5px/1.6 var(--mono); overflow-x: auto; white-space: pre; }
 .steps { counter-reset: step; }
 .steps li { counter-increment: step; display: flex; gap: 14px; }
 .steps li::before { content: counter(step); font-family: var(--display); font-weight: 900; color: var(--accent); }

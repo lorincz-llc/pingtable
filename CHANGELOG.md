@@ -4,6 +4,26 @@ What changed in each release, newest first. Versions follow
 [semantic versioning](https://semver.org); before 1.0, anything may still
 change between releases.
 
+## 0.2.0 - 2026-11-17
+
+- **Port check.** A new window (`PORTS` on the bar, the `O` key, or
+  right-click a host) tries the TCP ports you choose on one host and says for
+  each whether it is open, closed or gave no answer. Common ports are one
+  click; others can be typed, with short ranges. WATCH IN THE TABLE turns the
+  ports into rows.
+- The Add window offers PING and the common ports as choices, so a host can be
+  added as a ping, as one or more port checks, or both, without typing
+  `host:port`.
+- Rows that check a port show it beside the host (`example.com:443`).
+- `IMPORT A FILE…` is now in the Add window, the menu, the right-click menu
+  and the empty table, not only in the host list window.
+- Command line: `pingtable-cli ports HOST [PORT...]`. The help and the README
+  explain what `pingtable-cli.exe` is and how to use it.
+- API: `POST /api/v1/portcheck`; `POST /api/v1/hosts/add` accepts `ports`,
+  `ports_text` and `ping`.
+- The pingtable.net page is open to search engines and describes port checks
+  and the command line.
+
 ## 0.1.1 - 2026-11-17
 
 No change to how pingtable pings or what it shows.

@@ -151,6 +151,9 @@ function fmtSpan(ms) {
 const fmtPct = (p) => (p === 0 ? '0' : p < 10 ? p.toFixed(1) : Math.round(p)) + '%';
 const fmtEvery = (s) => (s % 3600 === 0 ? s / 3600 + 'h' : s % 60 === 0 ? s / 60 + 'm' : s + 's');
 const checkLabel = (p) => (p.kind === 'tcp' ? 'TCP ' + p.port : 'ICMP');
+/** A row's host as it is typed in the list: with its port when the row is a port check. */
+const hostWithPort = (r) => (r.probe.kind !== 'tcp' ? r.host : (r.host.includes(':') ? `[${r.host}]` : r.host) + ':' + r.probe.port);
+const hostCell = (r) => (r.probe.kind !== 'tcp' ? esc(r.host) : `${esc(r.host.includes(':') ? `[${r.host}]` : r.host)}<span class="port">:${r.probe.port}</span>`);
 
 function ipKey(ip) {
   if (!ip) return null;
@@ -211,7 +214,7 @@ const STATE_RANK = { down: 0, failing: 1, recovering: 2, pending: 3, up: 4, mute
 
 const COLS = [
   { id: 'state', label: '', w: 32, cls: 'c-state', fixed: true, sort: (r) => STATE_RANK[r.state], html: (r) => `<span class="sq ${r.state}" title="${STATE_TITLE[r.state]}"></span>` },
-  { id: 'host', label: 'Host', w: 180, cls: 'c-host', fixed: true, sort: (r) => r.host.toLowerCase(), html: (r) => esc(r.host), title: (r) => r.host },
+  { id: 'host', label: 'Host', w: 180, cls: 'c-host', fixed: true, sort: (r) => r.host.toLowerCase() + (r.probe.kind === 'tcp' ? ':' + String(r.probe.port).padStart(5, '0') : ''), html: hostCell, title: hostWithPort },
   { id: 'ip', label: 'IP address', w: 138, cls: 'dim', sort: (r) => ipKey(r.ip), html: (r) => (r.ip && r.ip !== r.host ? esc(r.ip) : r.ip ? `<span class="none">${esc(r.ip)}</span>` : none) },
   { id: 'description', label: 'Description', w: 150, flex: true, sort: (r) => r.description.toLowerCase() || null, html: (r) => esc(r.description), title: (r) => r.description },
   { id: 'last', label: 'Last ms', w: 100, num: true, cls: 'c-last', sort: (r) => (r.last_status == null ? null : r.last_rtt_us ?? Infinity), html: lastCell, extra: (r) => (r.last_status && r.last_status !== 'ok' ? ' is-fail' : ''), title: (r) => (r.last_status && r.last_status !== 'ok' ? STATUS_LABEL[r.last_status] : r.last_at_ms ? 'at ' + fmtClock(r.last_at_ms) : '') },
@@ -1009,6 +1012,11 @@ async function importFile(file) {
   } catch (err) { toast('down', 'ERROR', err.message); }
 }
 
+/** Ask for a CSV or text file of hosts. Dropping one on the window does the same. */
+function pickImportFile() {
+  $('f-import-any').click();
+}
+
 // -------------------------------------------------------------- add hosts
 
 /** The group new hosts most likely belong in: the selected host's. */
@@ -1031,7 +1039,12 @@ function openAdd(group, text) {
   $('add-text').value = text || '';
   $('add-msg').textContent = '';
   $('add-msg').classList.remove('bad');
-  if (!$('dlg-add').open) $('dlg-add').showModal();
+  if (!$('dlg-add').open) {
+    // A fresh window starts at plain ping; while it stays open the choice is kept for the next host.
+    renderChips($('add-chips'), { ping: true, count: 6, on: ['ping'] });
+    $('add-ports').value = '';
+    $('dlg-add').showModal();
+  }
   ($('add-group').value === '\u0000new' && !text ? $('add-new') : $('add-text')).focus();
 }
 
@@ -1043,9 +1056,14 @@ async function addHosts() {
   msg.classList.add('bad');
   if (!entries.length) { msg.textContent = 'Type a host name or an address.'; $('add-text').focus(); return; }
   if (choice === '\u0000new' && !group) { msg.textContent = 'Give the new group a name.'; $('add-new').focus(); return; }
+  const ping = chipPing($('add-chips'));
+  const ports = chipPorts($('add-chips'));
+  const portsText = $('add-ports').value.trim();
+  if (!ping && !ports.length && !portsText) { msg.textContent = 'Choose PING or at least one port.'; return; }
   try {
-    const out = await api('hosts/add', { method: 'POST', body: { entries, group: group || null } });
-    const done = `Added ${out.added} ${out.added === 1 ? 'host' : 'hosts'}${group ? ' to ' + group : ''}. Add more, or close.`;
+    const out = await api('hosts/add', { method: 'POST', body: { entries, group: group || null, ports, ports_text: portsText, ping } });
+    const noun = ports.length || portsText ? ['row', 'rows'] : ['host', 'hosts'];
+    const done = `Added ${out.added} ${noun[out.added === 1 ? 0 : 1]}${group ? ' to ' + group : ''}. Add more, or close.`;
     // Stay open for the next one, in the same group. The new group exists only once the table has it.
     await new Promise((resolve) => setTimeout(resolve, 250));
     openAdd(group, '');
@@ -1202,6 +1220,7 @@ function hostMenu(r) {
       { label: r.enabled ? 'Mute' : 'Unmute', hint: 'M', run: () => toggleEnabled(r.id) },
       { label: 'Ping only this host', run: () => bulk('solo', [r.id]) },
       { label: 'Trace route', disabled: r.probe.kind !== 'icmp' && !r.ip, run: () => openTrace(r) },
+      { label: 'Check ports…', hint: 'O', run: () => openPorts(r) },
       { label: 'Measure…', disabled: !r.enabled, run: () => openMeasure([r.id]) },
       store.counts.muted > 0 && { label: 'Unmute every host', run: () => bulk('unmute_all', []) },
       { label: 'Show details', hint: 'Enter', run: () => select(r.id, true) },
@@ -1278,7 +1297,9 @@ function tableMenu() {
     items: [
       { label: 'Add a host…', hint: 'A', run: () => openAdd() },
       { label: 'Add a new group…', run: () => openAdd('\u0000new') },
+      { label: 'Import hosts from a file…', run: pickImportFile },
       { label: 'Edit the host list…', hint: 'H', run: () => openHosts() },
+      { label: 'Check ports on a host…', hint: 'O', run: () => openPorts() },
       'sep',
       { label: 'Settings…', hint: ',', run: () => openSettings() },
     ],
@@ -1457,6 +1478,117 @@ function traceText(out) {
   return lines.join('\n');
 }
 
+// -------------------------------------------------------------- port check
+
+/** TCP ports offered as one-click choices. Keep in step with COMMON_PORTS in crates/core/src/portcheck.rs. */
+const PORT_CHOICES = [[22, 'SSH'], [80, 'HTTP'], [443, 'HTTPS'], [3389, 'RDP'], [445, 'SMB'], [53, 'DNS'], [25, 'SMTP'], [3306, 'MySQL'], [5432, 'Postgres'], [1433, 'MSSQL'], [8080, 'HTTP alt'], [8443, 'HTTPS alt']];
+const PORT_STATE = { open: 'OPEN, listening', closed: 'CLOSED, refused', no_answer: 'NO ANSWER' };
+const PORTS_HELP = 'One TCP connection is opened to each port and closed again; nothing is sent. OPEN means something is listening. CLOSED means the host answered and refused. NO ANSWER usually means a firewall dropped it, or the host is off.';
+
+/** Fill a row of toggle buttons: an optional PING choice, then the first `count` common ports. */
+function renderChips(el, { ping = false, count = PORT_CHOICES.length, on = [] } = {}) {
+  const chip = (attr, isOn, title, text) => `<button type="button" class="chip${isOn ? ' is-on' : ''}" ${attr} aria-pressed="${isOn}" title="${title}">${text}</button>`;
+  el.innerHTML =
+    (ping ? chip('data-ping', on.includes('ping'), 'ICMP echo: is the host there?', 'PING') : '') +
+    PORT_CHOICES.slice(0, count).map(([port, name]) => chip(`data-port="${port}"`, on.includes(port), `TCP ${port}: is ${name} listening?`, `${port}<i>${name}</i>`)).join('');
+}
+const chipPorts = (el) => [...el.querySelectorAll('.chip.is-on[data-port]')].map((b) => Number(b.dataset.port));
+const chipPing = (el) => !!el.querySelector('.chip.is-on[data-ping]');
+function toggleChip(e) {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  const on = !chip.classList.contains('is-on');
+  chip.classList.toggle('is-on', on);
+  chip.setAttribute('aria-pressed', String(on));
+}
+
+let portsGroup = null; // the group "watch in the table" adds rows to
+let portsLast = null;  // the last answer, for copy and watch
+let portsSeq = 0;
+
+/** Open the port check window, for row `r` when there is one. Nothing is sent until CHECK. */
+function openPorts(r) {
+  r = r || (view.selected != null ? store.hosts.get(view.selected) : null) || null;
+  portsGroup = r ? r.group || '' : null;
+  portsLast = null;
+  portsSeq++;
+  const remembered = Array.isArray(prefs.ports) && prefs.ports.length ? prefs.ports : [22, 80, 443, 3389];
+  const own = r && r.probe.kind === 'tcp' ? r.probe.port : null;
+  const isChoice = own != null && PORT_CHOICES.some(([port]) => port === own);
+  renderChips($('pc-chips'), { on: isChoice ? [own, ...remembered] : remembered });
+  $('pc-host').value = r ? r.host : '';
+  $('pc-ports').value = own != null && !isChoice ? String(own) : '';
+  $('pc-note').textContent = PORTS_HELP;
+  $('pc-table').innerHTML = '';
+  $('pc-msg').textContent = '';
+  $('pc-msg').classList.remove('bad');
+  $('pc-copy').hidden = true;
+  $('pc-watch').hidden = true;
+  $('pc-go').disabled = false;
+  if (!$('dlg-ports').open) $('dlg-ports').showModal();
+  (r ? $('pc-go') : $('pc-host')).focus();
+}
+
+const portStateText = (p) => PORT_STATE[p.state] ?? STATUS_LABEL[p.status] ?? 'Failed';
+
+async function runPortCheck() {
+  const host = $('pc-host').value.trim();
+  const ports = chipPorts($('pc-chips'));
+  const msg = $('pc-msg');
+  msg.classList.add('bad');
+  if (!host) { msg.textContent = 'Type a host name or an address.'; $('pc-host').focus(); return; }
+  const mine = ++portsSeq;
+  msg.classList.remove('bad');
+  msg.textContent = 'Checking… a port that does not answer takes a few seconds.';
+  $('pc-go').disabled = true;
+  try {
+    const out = await api('portcheck', { method: 'POST', body: { host, ports, ports_text: $('pc-ports').value.trim() } });
+    if (mine !== portsSeq) return;
+    portsLast = out;
+    prefs.ports = ports;
+    savePrefs();
+    const n = out.results.length;
+    msg.textContent = '';
+    $('pc-note').textContent = `${out.open} of ${n} ${n === 1 ? 'port' : 'ports'} open on ${out.host}${out.target !== out.host ? ` (${out.target})` : ''}, checked from ${out.from}${out.source ? ` (${out.source})` : ''} at ${fmtClock(out.checked_at_ms)}, waiting up to ${out.timeout_ms} ms for each. ${PORTS_HELP}`;
+    $('pc-table').innerHTML =
+      '<div class="hd"><span class="n">Port</span><span>Usually</span><span>Result</span><span class="n">ms</span></div>' +
+      out.results.map((p) => `<div><span class="n"><b>${p.port}</b></span><span class="quiet">${esc(p.service ?? '')}</span>` +
+        `<span class="${p.state}">${esc(portStateText(p))}</span><span class="n${p.rtt_us == null ? ' quiet' : ''}">${fmtMs(p.rtt_us) ?? '–'}</span></div>`).join('');
+    $('pc-copy').hidden = false;
+    $('pc-watch').hidden = false;
+  } catch (err) {
+    if (mine === portsSeq) { msg.classList.add('bad'); msg.textContent = err.message; }
+  } finally {
+    if (mine === portsSeq) $('pc-go').disabled = false;
+  }
+}
+
+function portsText(out) {
+  const lines = [`Port check of ${out.host}${out.target !== out.host ? ` (${out.target})` : ''} from ${out.from}${out.source ? ` (${out.source})` : ''}`];
+  for (const p of out.results) {
+    lines.push(`${String(p.port).padStart(5)}  ${(p.service ?? '').padEnd(16)} ${portStateText(p).padEnd(18)}${p.rtt_us == null ? '' : (fmtMs(p.rtt_us) + ' ms').padStart(10)}`.trimEnd());
+  }
+  lines.push(stampLine());
+  return lines.join('\n');
+}
+
+/** Turn the ports just checked into rows, so they are checked all the time. */
+async function watchPorts() {
+  const out = portsLast;
+  if (!out) return;
+  const msg = $('pc-msg');
+  const watched = new Set([...store.hosts.values()].filter((r) => r.host === out.host && r.probe.kind === 'tcp').map((r) => r.probe.port));
+  const ports = out.results.map((p) => p.port).filter((port) => !watched.has(port));
+  msg.classList.remove('bad');
+  if (!ports.length) { msg.textContent = 'These ports are already rows in the table.'; return; }
+  try {
+    const group = portsGroup ?? likelyGroup();
+    const added = await api('hosts/add', { method: 'POST', body: { entries: [out.host], group: group || null, ports, ping: false } });
+    msg.textContent = `Added ${added.added} ${added.added === 1 ? 'row' : 'rows'}${group ? ' to ' + group : ''}. They are checked with the rest from now on.`;
+    if (!store.running && loaded.autostart !== false) control('start');
+  } catch (err) { msg.classList.add('bad'); msg.textContent = err.message; }
+}
+
 async function restoreDefaultHosts() {
   try {
     const defaults = await api('defaults');
@@ -1499,6 +1631,8 @@ async function openAbout() {
       ['Built with', `Rust ${info.rustc}, compiled for ${info.target}`],
       ['This computer', info.machine + (source && source.default_v4 ? `, sending from ${source.default_v4}` : '')],
       ['Pings sent with', info.icmp],
+      ['Port checks', 'a TCP connection to the port, closed at once; nothing is sent'],
+      ['Command line', 'pingtable-cli, beside the app: once, ports, or --help'],
       ['Shown in', window.__PINGTABLE_SHELL__ ? 'its own window (Microsoft Edge WebView2)' : 'your browser'],
       ['Settings file', info.config_path],
     ];
@@ -1630,6 +1764,9 @@ function wire() {
   $('search').addEventListener('input', (e) => { view.query = e.target.value.trim().toLowerCase(); schedule(); });
   $('btn-toggle').addEventListener('click', () => control(store.running || store.measureEndsAt != null ? 'stop' : 'start'));
   $('btn-add').addEventListener('click', () => openAdd());
+  $('btn-ports').addEventListener('click', () => openPorts());
+  $('mi-ports').addEventListener('click', () => { toggleMenu(false); openPorts(); });
+  $('mi-import').addEventListener('click', () => { toggleMenu(false); pickImportFile(); });
   $('foot-src').addEventListener('click', () => openSettings('network'));
   $('foot-rate').addEventListener('click', () => openSettings('pinging'));
   $('btn-settings').addEventListener('click', () => openSettings());
@@ -1639,6 +1776,17 @@ function wire() {
 
   // Add window
   $('add-go').addEventListener('click', addHosts);
+  $('add-chips').addEventListener('click', toggleChip);
+  $('add-import').addEventListener('click', pickImportFile);
+  $('add-ports').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addHosts(); } });
+
+  // Port check window
+  $('pc-chips').addEventListener('click', toggleChip);
+  $('pc-go').addEventListener('click', runPortCheck);
+  $('pc-close').addEventListener('click', () => $('dlg-ports').close());
+  $('pc-copy').addEventListener('click', () => { if (portsLast) copyText(portsText(portsLast), 'Port check of ' + portsLast.host); });
+  $('pc-watch').addEventListener('click', watchPorts);
+  for (const id of ['pc-host', 'pc-ports']) $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runPortCheck(); } });
   $('add-close').addEventListener('click', () => $('dlg-add').close());
   $('add-group').addEventListener('change', () => {
     const fresh = $('add-group').value === '\u0000new';
@@ -1674,6 +1822,14 @@ function wire() {
     importFile(e.dataTransfer.files[0]);
   });
   $('btn-import').addEventListener('click', () => $('f-import').click());
+  // The same import from anywhere else: the file's hosts open in the list editor for review.
+  $('f-import-any').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if ($('dlg-add').open) $('dlg-add').close();
+    importFile(file);
+  });
   $('f-import').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
@@ -1719,6 +1875,7 @@ function wire() {
   });
   $('thead').addEventListener('dragend', () => { draggedCol = null; clearDropMarks(); });
   $('btn-empty-add').addEventListener('click', () => openAdd());
+  $('btn-empty-import').addEventListener('click', pickImportFile);
   $('btn-empty-example').addEventListener('click', useExampleHosts);
   $('btn-defaults').addEventListener('click', restoreDefaultHosts);
 
@@ -1865,6 +2022,7 @@ function wire() {
       h: () => openHosts(),
       a: () => openAdd(),
       Insert: () => openAdd(),
+      o: () => openPorts(),
       ',': () => openSettings(),
       Delete: () => { const rows = selectedRows(); if (rows.length) removeHosts(rows); },
       g: () => { prefs.grouped = !prefs.grouped; savePrefs(); schedule(); },

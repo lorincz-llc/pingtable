@@ -2,9 +2,11 @@
 
 [pingtable.net](https://pingtable.net)
 
-Ping many hosts and watch them in one table. One Rust program does the pinging
-and serves its own interface on `127.0.0.1`. The same interface runs in a
-native Windows window, in a browser tab, or as an installed Chrome app.
+Ping many hosts and watch them in one table, and check whether the TCP ports
+you care about are listening. One Rust program does the work and serves its own
+interface on `127.0.0.1`. The same interface runs in a native Windows window,
+in a browser tab, or as an installed Chrome app, and the same checks run from
+the command line.
 
 Status: early, and moving fast. Everything described here runs. Nothing is
 stored between runs except settings, the host list and which hosts are muted.
@@ -21,28 +23,72 @@ publisher" warning the first time. Each release lists the SHA-256 of its zip.
 
 ## Run it
 
-**Windows.** Double-click `pingtable.exe`. Closing the window stops pingtable.
-`pingtable-cli.exe` is the console program described next.
+The zip holds two programs. They share one settings file and one host list.
 
-**Anywhere, in a browser:**
+| Program | What it is | Reach for it when |
+|---|---|---|
+| `pingtable.exe` | the app, in its own window | you want to watch the table |
+| `pingtable-cli.exe` | the same program without the window, for a terminal | you want one quick answer, a script or scheduled task, or the table in a browser tab |
 
-```bash
-cargo run --release -p pingtable
-```
-
-It prints a link such as `http://127.0.0.1:7464/?t=…` and opens it. The link
-carries an access token; the browser remembers it after the first visit.
-
-Ping once from the terminal and exit (exit status 0 only if every host answered):
-
-```bash
-cargo run --release -p pingtable -- once 192.168.1.1 example.com:443 --format table
-```
-
-`--format` is `table`, `json` or `csv`. `pingtable --help` lists every option.
-
+**The app.** Double-click `pingtable.exe`. Closing the window stops pingtable.
 A new install starts with an example host list. "Restore default hosts" in the
-hosts window brings it back.
+host list window brings it back.
+
+**The command line.** `pingtable-cli.exe` needs no window and no administrator
+rights. Open a terminal in the folder (in File Explorer, type `cmd` in the
+address bar and press Enter) and use one of its three commands:
+
+```
+pingtable-cli once 192.168.1.1 example.com:443
+```
+
+pings each host one time, prints the result and exits:
+
+```
+HOST         IP             CHECK    STATE  STATUS              TIME ms  TTL  DESCRIPTION
+192.168.1.1  192.168.1.1    icmp     UP     OK                     0.41   64
+example.com  93.184.215.14  tcp:443  UP     OK                    12.80    -
+```
+
+```
+pingtable-cli ports example.com 22 80 443
+```
+
+checks which TCP ports are listening on one host (see [Port check](#port-check)):
+
+```
+example.com (93.184.215.14): 2 of 3 ports open
+   22  SSH              no answer
+   80  HTTP             open          12.6 ms
+  443  HTTPS            open          12.9 ms
+```
+
+```
+pingtable-cli
+```
+
+runs pingtable without the window and opens the table in your default browser.
+It prints a link such as `http://127.0.0.1:7464/?t=…`; the link carries an
+access token, and the browser remembers it after the first visit. Ctrl+C stops
+it. If the app is already running, this opens the browser on the running one.
+
+| Option | Applies to | Meaning |
+|---|---|---|
+| `--format table\|json\|csv` | `once`, `ports` (no `csv`) | how the result is printed |
+| `--timeout MS` | `once`, `ports` | how long to wait for each answer |
+| `--hosts FILE` | `once` | read the host list from a file |
+| `--described` | `once` | the list is one "address description" per line |
+| `--port N` | serving | port for the interface (default 7464) |
+| `--no-open` | serving | do not open the browser |
+| `--config FILE` | serving | use this settings file |
+
+`once` and `ports` exit with status 0 only when every host answered or every
+port was open, 1 when not, and 2 when the command could not be understood, so
+a script or a scheduled task can act on the answer. `pingtable-cli --help`
+lists everything.
+
+**From source, on any system:** `cargo run --release -p pingtable` is the
+command-line program; add `-- once …` or `-- ports …` for the other commands.
 
 ## What it does
 
@@ -50,10 +96,16 @@ hosts window brings it back.
   the last 60 pings, loss, reverse-lookup name and more. Columns can be shown,
   hidden, sorted, resized and reordered by dragging. Rows can be grouped. In a
   narrow window the less important columns give way, down to host, last and trend.
+- **Port check.** `PORTS`, the `O` key, or right-click a host: pick 22, 80,
+  443, 3389 or any other ports and see within seconds which are open, which
+  the host refused and which gave no answer. One click turns the ports into
+  rows that are checked all the time. More under [Port check](#port-check).
 - **Adding hosts.** `+ ADD`, the `A` key, right-click, or paste: type a host
-  and an optional description and pick (or name) a group. Drop a CSV or text
-  file on the window to import it. "Remove from the list" takes a host out.
-  The whole list can still be edited as text.
+  and an optional description, choose PING, one or more ports, or both, and
+  pick (or name) a group. "Remove from the list" takes a host out. The whole
+  list can still be edited as text.
+- **Importing.** `IMPORT A FILE…` in the Add window, the menu, the right-click
+  menu and the empty table, or drop a CSV or text file anywhere on the window.
 - **Footer.** The computer and interface pings leave from, the interval and
   timeout, the ping rate and how many pings are in flight.
 - **Detail panel.** Latency chart, percentiles, loss over the last 5 minutes
@@ -70,10 +122,43 @@ hosts window brings it back.
   can run a command.
 - **Two looks.** Light (the default) and dark, switched from the bar or with `T`.
 
+## Port check
+
+A port check answers one question: is anything listening on this TCP port of
+this host? pingtable opens an ordinary TCP connection to the port and closes it
+again the moment it opens. No data is sent, and no administrator rights are
+needed.
+
+| Result | What happened | What it usually means |
+|---|---|---|
+| **open** | the connection opened | a service is listening |
+| **closed** | the host answered and refused | the host is up, nothing listens on that port |
+| **no answer** | nothing came back before the timeout | a firewall dropped it, or the host is off |
+
+Three ways to use it:
+
+- **Once, on the spot.** `PORTS` on the bar, the `O` key, or "Check ports…"
+  on a host's right-click menu. Choose from the usual ports or type others
+  (`8080 9000-9005`), press CHECK, and copy the result if you need to pass it on.
+- **All the time.** Add a host with a port (`example.com:443`), tick ports in
+  the Add window, or press WATCH IN THE TABLE after a check. Each port is its
+  own row, shown as `host:port`, with the same trend, loss and alerts as a ping.
+- **From a terminal or a script.** `pingtable-cli ports HOST [PORT...]`.
+
+One check takes one host and at most 64 ports; it is a check of the ports you
+name, not a scanner. It is TCP only. Check only hosts you are allowed to test.
+
+A check waits up to 3 seconds for each port, all at once. Windows takes about
+two seconds to report that a host refused a connection, so a shorter wait
+could not tell "closed" from "no answer". For the same reason a port row in
+the table, with the usual 1 second timeout, shows a closed port as timed out:
+down either way, but give that row `timeout=3s` if the difference matters.
+
 ## Importing
 
-A file dropped on the window, or chosen with "Import a file" in the host list
-window, is read as one of:
+A file chosen with `IMPORT A FILE…` (in the Add window, the menu, the
+right-click menu, the empty table and the host list window), or dropped
+anywhere on the window, is read as one of:
 
 | File | How it is read |
 |---|---|
@@ -89,7 +174,7 @@ host are skipped and counted. Nothing changes until the list is applied.
 | You type | It does |
 |---|---|
 | `nas.lan` `192.168.1.10` `2001:db8::1` | ICMP ping |
-| `example.com:443` `[2001:db8::1]:22` | TCP connect to a port (nothing is sent) |
+| `example.com:443` `[2001:db8::1]:22` | port check: is that TCP port listening? (nothing is sent) |
 | `https://example.com` | TCP 443 (`http` is 80, `ssh` is 22) |
 | `10.0.0.1-10.0.0.20` | every address in the range |
 | `10.0.0.0/24` | every address in the block |
@@ -147,7 +232,8 @@ token in an `X-Pingtable-Token` header. Field names carry their units
 | `POST /api/v1/hosts/{id}` | `{"enabled": false}` mutes; `{"action": "ping_now" \| "reset"}` |
 | `POST /api/v1/hosts/{id}/trace` | trace the route to a host |
 | `POST /api/v1/hosts` | `{"action": "mute" \| "unmute" \| "solo" \| "unmute_all" \| "ping_now" \| "reset" \| "remove", "ids": [...]}` |
-| `POST /api/v1/hosts/add` | `{"entries": ["nas.lan NAS"], "group": "Home lab"}` adds hosts to a group (created if new) |
+| `POST /api/v1/hosts/add` | `{"entries": ["nas.lan NAS"], "group": "Home lab"}` adds hosts to a group (created if new). With `"ports": [22, 443]` each host gets one row for each port; `"ping": true` keeps the ping row too |
+| `POST /api/v1/portcheck` | `{"host": "example.com", "ports": [22, 443], "ports_text": "8000-8010"}` tries each port once and returns `open`, `closed` or `no_answer` for each. Changes nothing |
 | `POST /api/v1/import` | `{"text": "..."}` turns a CSV or text file into host-list lines, without applying them |
 | `POST /api/v1/measure` | `{"ids": [...], "duration_secs": 60, "per_second": 5}` starts a measurement |
 | `GET /api/v1/measure`, `POST /api/v1/measure/stop` | its progress and result; end it early |
@@ -167,12 +253,12 @@ matters: the settings include commands that pingtable will run.
 
 | Path | What |
 |---|---|
-| `crates/core` | parser, list editing and import, probes, scheduler, statistics, measurements, traceroute, exports. No UI. |
+| `crates/core` | parser, list editing and import, probes, scheduler, statistics, measurements, traceroute, port check, exports. No UI. |
 | `crates/app` | two programs: `pingtable` (command line, config file, HTTP server) and `pingtable-window` (the Windows window, a WebView2 frame around the same interface) |
 | `crates/app/assets` | Windows icon and manifest; the icon is drawn by `scripts/make-icon.py` |
 | `ui/` | the interface: plain HTML, CSS and JavaScript, no build step. Compiled into the binary. |
 | `site/` | the pingtable.net page: plain HTML, CSS and JavaScript, no build step, same two looks as the app |
-| `brand/` | theme record and the icon options sheet |
+| `brand/` | theme record, the icon options sheet, and the images used on GitHub |
 
 While working on the interface, serve it from disk so a browser refresh picks
 up edits without rebuilding:
@@ -209,7 +295,7 @@ scripts/build-windows.sh
 |---|---|
 | `pingtable.exe` | the window app |
 | `WebView2Loader.dll` | Microsoft's loader for the window; keep it beside `pingtable.exe` |
-| `pingtable-cli.exe` | the console program (`serve`, `once`) |
+| `pingtable-cli.exe` | the command-line program: `once`, `ports`, or the table in a browser |
 
 To make the zip for a release, with the license, notices and disclaimer
 inside and the notes for the release page beside it:
