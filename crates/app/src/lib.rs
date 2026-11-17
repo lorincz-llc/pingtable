@@ -3,7 +3,8 @@
 //!
 //! Two programs are built from this crate:
 //!
-//! * `pingtable`, a console program: `pingtable [serve]` and `pingtable once`.
+//! * `pingtable`, a console program: `pingtable [serve]`, `once`, `ports`,
+//!   `api`, and `mcp` (the checks as tools for an AI agent).
 //! * `pingtable-window`, a Windows GUI program that shows the same interface
 //!   in its own window.
 
@@ -18,6 +19,7 @@ pub const SOURCE: &str = "https://github.com/lorincz-llc/pingtable";
 
 pub mod cli;
 pub mod config;
+pub mod mcp;
 pub mod server;
 #[cfg(windows)]
 pub mod window;

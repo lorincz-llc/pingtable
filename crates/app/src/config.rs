@@ -142,6 +142,14 @@ pub fn load(explicit: Option<&Path>) -> (PathBuf, Config) {
     (path, cfg)
 }
 
+/// Read the config without creating or changing anything. None when there is
+/// no usable config yet, which means pingtable has not run here.
+pub fn peek(explicit: Option<&Path>) -> Option<(PathBuf, Config)> {
+    let path = explicit.map(Path::to_path_buf).unwrap_or_else(default_path);
+    let cfg: Config = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+    (cfg.token.len() >= 16).then_some((path, cfg))
+}
+
 /// Write the config through a temporary file so a crash cannot truncate it.
 pub fn save(path: &Path, cfg: &Config) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {

@@ -3,7 +3,7 @@
 #
 #   pingtable.exe       the window app (double-click it)
 #   WebView2Loader.dll  Microsoft's loader for the window; must sit beside pingtable.exe
-#   pingtable-cli.exe   the console program: `serve` and `once`
+#   pingtable-cli.exe   the command-line program: `once`, `ports`, `api`, `mcp`, or the table in a browser
 #
 # Needs: sudo apt install -y mingw-w64   and   rustup target add x86_64-pc-windows-gnu
 set -euo pipefail
@@ -14,6 +14,8 @@ cargo build --release -p pingtable --target "$target"
 
 out=dist/windows
 mkdir -p "$out"
+# A fresh build is unsigned until scripts/sign-windows.sh runs again.
+rm -f "$out/SIGNED.txt"
 cp "target/$target/release/pingtable-window.exe" "$out/pingtable.exe"
 cp "target/$target/release/pingtable.exe" "$out/pingtable-cli.exe"
 

@@ -1,6 +1,6 @@
-//! The command line: `pingtable [serve]`, `pingtable once` and `pingtable ports`.
+//! The command line: `pingtable [serve]`, `once`, `ports`, `api` and `mcp`.
 
-use crate::{config, server};
+use crate::{config, mcp, server};
 use pingtable_core::probe::ProbeParams;
 use pingtable_core::{export, netinfo, portcheck, Engine, Settings};
 use serde_json::json;
@@ -19,9 +19,11 @@ USAGE
   pingtable once [OPTIONS] [HOST...]   ping every host once and print the result
   pingtable ports [OPTIONS] HOST [PORT...]
                                        check which TCP ports answer on one host
+  pingtable api [--format json]        show how to call this computer's pingtable
+  pingtable mcp                        serve the checks to an AI agent (MCP, stdio)
 
 OPTIONS
-  --config FILE     use this config file
+  --config FILE     use this config file (mcp, api: the running app to talk to)
   --port N          port for the web UI (default 7464)
   --no-open         do not open the browser
   --hosts FILE      once: read the host list from a file
@@ -47,6 +49,15 @@ PORTS
   no answer: a firewall dropped it, or the host is off.
   Windows takes about two seconds to report a refusal, so with a timeout
   under 2500 a closed port can show as no answer.
+
+AI AGENTS AND SCRIPTS
+  pingtable mcp is a Model Context Protocol server on standard input and
+  output. Point an agent at it with the command: pingtable-cli mcp
+  It then has the tools ping, check_ports, trace_route, network_info,
+  table_status and table_add_hosts. A script can use once and ports with
+  --format json, or the local HTTP API: pingtable api prints its address
+  and access token.
+  Guide: https://github.com/lorincz-llc/pingtable/blob/main/docs/ai-agents.md
 
 EXIT STATUS
   once, ports: 0 when every host is up or every port is open, 1 when not,
@@ -94,7 +105,7 @@ fn parse_args() -> Result<Args, String> {
                 args.timeout_ms = Some(value("--timeout")?.parse().map_err(|_| "--timeout needs a number".to_string())?)
             }
             "--described" => args.described = true,
-            "serve" | "once" | "ports" if args.command.is_none() && args.hosts.is_empty() => args.command = Some(arg),
+            "serve" | "once" | "ports" | "api" | "mcp" if args.command.is_none() && args.hosts.is_empty() => args.command = Some(arg),
             other if other.starts_with("--") => return Err(format!("unknown option {other}")),
             _ => args.hosts.push(arg),
         }
@@ -114,6 +125,8 @@ pub fn main() -> ExitCode {
     match args.command.as_deref() {
         Some("once") => once(args),
         Some("ports") => ports(args),
+        Some("api") => api(args),
+        Some("mcp") => mcp::serve_stdio(args.config),
         _ => serve(args),
     }
 }
@@ -273,4 +286,48 @@ fn ports(args: Args) -> ExitCode {
     } else {
         ExitCode::from(1)
     }
+}
+
+/// `pingtable api`: how to call the local API of this install.
+fn api(args: Args) -> ExitCode {
+    let (path, mut cfg) = config::load(args.config.as_deref());
+    if let Some(port) = args.port {
+        cfg.set_port(port);
+    }
+    let base = format!("http://127.0.0.1:{}/api/v1", cfg.port);
+    let running = server::is_pingtable(cfg.port, &cfg.token);
+    match args.format.as_deref().unwrap_or("table") {
+        "json" => {
+            let doc = json!({
+                "schema_version": 1, "base_url": base, "header": "X-Pingtable-Token", "token": cfg.token,
+                "running": running, "config_path": path.display().to_string(),
+            });
+            println!("{}", serde_json::to_string_pretty(&doc).unwrap_or_default());
+        }
+        "table" => {
+            let token = &cfg.token;
+            println!("pingtable API on this computer");
+            println!("  address   {base}");
+            println!("  header    X-Pingtable-Token: {token}");
+            println!("  running   {}", if running { "yes" } else { "no: start pingtable.exe, or run pingtable-cli with no arguments" });
+            println!("  settings  {}", path.display());
+            println!();
+            println!("The token is a password for this computer's pingtable. Keep it to yourself.");
+            println!();
+            println!("Read the table:");
+            println!("  curl -H \"X-Pingtable-Token: {token}\" {base}/state");
+            println!("  Invoke-RestMethod {base}/state -Headers @{{'X-Pingtable-Token'='{token}'}}");
+            println!();
+            println!("Check ports on a host:");
+            println!("  curl -H \"X-Pingtable-Token: {token}\" -H \"Content-Type: application/json\" \\");
+            println!("       -d \"{{\\\"host\\\":\\\"example.com\\\",\\\"ports\\\":[22,443]}}\" {base}/portcheck");
+            println!();
+            println!("Every call: {}/blob/main/docs/api.md", crate::SOURCE);
+        }
+        other => {
+            eprintln!("pingtable: unknown format \"{other}\" (use table or json)");
+            return ExitCode::from(2);
+        }
+    }
+    ExitCode::SUCCESS
 }

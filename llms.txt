@@ -1,0 +1,28 @@
+# pingtable
+
+> pingtable pings many hosts, checks whether TCP ports are listening, and
+> traces routes. It is a small free Windows program (Rust, Apache-2.0) with a
+> window app, a command-line program, a local HTTP API and an MCP server, so a
+> person, a script or an AI agent can all use the same checks.
+
+Checks are sent from the computer pingtable runs on. Use it only on hosts the
+user owns or is allowed to test.
+
+## For agents
+
+- [Using pingtable from an AI agent](https://github.com/lorincz-llc/pingtable/blob/main/docs/ai-agents.md): the MCP server (`pingtable-cli mcp`), its six tools with arguments and example results, which tool to use when, limits.
+- [The local HTTP API](https://github.com/lorincz-llc/pingtable/blob/main/docs/api.md): every call with request and reply examples; `pingtable-cli api` prints the address and token.
+
+## Quick reference
+
+- MCP server command: `pingtable-cli mcp` (standard input and output; tools only).
+- Tools: `ping`, `check_ports`, `trace_route`, `network_info`, `table_status`, `table_add_hosts`.
+- Command line with JSON: `pingtable-cli once --format json HOST...`, `pingtable-cli ports --format json HOST [PORT...]`. Exit status 0 when everything answered, 1 when not, 2 for a bad command.
+- Port check results: `open` (listening), `closed` (host refused), `no_answer` (firewall, or host off).
+- A ping with no answer does not prove a host is off; many hosts drop pings. Check a port it should serve.
+
+## More
+
+- [README](https://github.com/lorincz-llc/pingtable/blob/main/README.md): what the app does, host list syntax, how it works.
+- [Download](https://github.com/lorincz-llc/pingtable/releases/latest): Windows 10 and 11, 64-bit, no installer, no administrator rights.
+- [Disclaimer](https://github.com/lorincz-llc/pingtable/blob/main/DISCLAIMER.md)

@@ -1633,6 +1633,7 @@ async function openAbout() {
       ['Pings sent with', info.icmp],
       ['Port checks', 'a TCP connection to the port, closed at once; nothing is sent'],
       ['Command line', 'pingtable-cli, beside the app: once, ports, or --help'],
+      ['AI agents', 'pingtable-cli mcp serves these checks as tools; pingtable-cli api shows the local API'],
       ['Shown in', window.__PINGTABLE_SHELL__ ? 'its own window (Microsoft Edge WebView2)' : 'your browser'],
       ['Settings file', info.config_path],
     ];

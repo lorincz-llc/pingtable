@@ -2,3 +2,5 @@
 /dist
 *.log
 pingtable.json
+signing.env
+store.env

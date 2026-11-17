@@ -4,6 +4,23 @@ What changed in each release, newest first. Versions follow
 [semantic versioning](https://semver.org); before 1.0, anything may still
 change between releases.
 
+## 0.3.0 - 2026-11-17
+
+- **For AI agents: an MCP server.** `pingtable-cli mcp` serves six tools over
+  standard input and output: `ping`, `check_ports`, `trace_route`,
+  `network_info`, `table_status` and `table_add_hosts`. It works with hosted
+  and local models, needs no account and opens no port. Protocol revisions
+  2024-11-05 through 2026-07-28 are served.
+- `pingtable-cli api` prints the address and token of the local API, with
+  example calls for curl and PowerShell, or as JSON for a program.
+- New guides: `docs/ai-agents.md` (set-up, every tool with an example, which
+  tool to use when), `docs/api.md` (every API call with examples) and
+  `llms.txt`.
+- For releases: `scripts/sign-windows.sh` signs the programs once a signing
+  account exists, `scripts/winget-manifest.sh` writes the winget manifests,
+  and `scripts/package-msix.sh` packs the Microsoft Store build. Each has a
+  page in `docs/`. This release itself is still unsigned.
+
 ## 0.2.0 - 2026-11-17
 
 - **Port check.** A new window (`PORTS` on the bar, the `O` key, or

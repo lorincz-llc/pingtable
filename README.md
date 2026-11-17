@@ -6,7 +6,8 @@ Ping many hosts and watch them in one table, and check whether the TCP ports
 you care about are listening. One Rust program does the work and serves its own
 interface on `127.0.0.1`. The same interface runs in a native Windows window,
 in a browser tab, or as an installed Chrome app, and the same checks run from
-the command line.
+the command line, from a script through a local API, and from an AI agent
+through an MCP server.
 
 Status: early, and moving fast. Everything described here runs. Nothing is
 stored between runs except settings, the host list and which hosts are muted.
@@ -36,7 +37,7 @@ host list window brings it back.
 
 **The command line.** `pingtable-cli.exe` needs no window and no administrator
 rights. Open a terminal in the folder (in File Explorer, type `cmd` in the
-address bar and press Enter) and use one of its three commands:
+address bar and press Enter) and use one of its commands:
 
 ```
 pingtable-cli once 192.168.1.1 example.com:443
@@ -72,9 +73,14 @@ It prints a link such as `http://127.0.0.1:7464/?t=…`; the link carries an
 access token, and the browser remembers it after the first visit. Ctrl+C stops
 it. If the app is already running, this opens the browser on the running one.
 
+Two more commands are for programs rather than people: `pingtable-cli mcp`
+serves the checks to an AI agent, and `pingtable-cli api` prints how to call
+the local API. Both are described under
+[AI agents and scripts](#ai-agents-and-scripts).
+
 | Option | Applies to | Meaning |
 |---|---|---|
-| `--format table\|json\|csv` | `once`, `ports` (no `csv`) | how the result is printed |
+| `--format table\|json\|csv` | `once`, `ports` and `api` (no `csv`) | how the result is printed |
 | `--timeout MS` | `once`, `ports` | how long to wait for each answer |
 | `--hosts FILE` | `once` | read the host list from a file |
 | `--described` | `once` | the list is one "address description" per line |
@@ -121,6 +127,33 @@ command-line program; add `-- once …` or `-- ports …` for the other commands
   ones. Each crossing shows a notice, glows on the row, can play a sound and
   can run a command.
 - **Two looks.** Light (the default) and dark, switched from the bar or with `T`.
+
+## AI agents and scripts
+
+pingtable is built to be driven by a program as easily as by a person.
+
+- **AI agents: an MCP server.** `pingtable-cli mcp` gives any agent that
+  speaks the Model Context Protocol six tools: `ping`, `check_ports`,
+  `trace_route`, `network_info`, and `table_status` and `table_add_hosts`
+  for the running app's table. It works with hosted models and with models
+  running on your own machine, and needs no account and no open port. Setting
+  it up is one entry in the client's settings:
+
+  ```json
+  { "mcpServers": { "pingtable": { "command": "C:\\Tools\\pingtable\\pingtable-cli.exe", "args": ["mcp"] } } }
+  ```
+
+- **Agents and scripts with a shell.** `pingtable-cli once --format json` and
+  `pingtable-cli ports --format json` print one JSON document and set the
+  exit status.
+- **Anything that speaks HTTP.** The local API does everything the window
+  does. `pingtable-cli api` prints its address, the access token and example
+  calls for curl and PowerShell.
+
+[docs/ai-agents.md](docs/ai-agents.md) is the guide for agents: set-up, each
+tool with its arguments and an example result, which tool to use when, and
+the limits. [docs/api.md](docs/api.md) is the API reference.
+[llms.txt](llms.txt) is the short version for a model to read first.
 
 ## Port check
 
@@ -224,6 +257,8 @@ is the target and the rest of the line is its description.
 Everything the interface does goes through `/api/v1` on the same port. Send the
 token in an `X-Pingtable-Token` header. Field names carry their units
 (`rtt_us`, `t_ms`, `interval_secs`) and documents have `schema_version`.
+`pingtable-cli api` prints the address and token for this computer, and
+[docs/api.md](docs/api.md) has every call with examples.
 
 | Call | Purpose |
 |---|---|
@@ -254,10 +289,12 @@ matters: the settings include commands that pingtable will run.
 | Path | What |
 |---|---|
 | `crates/core` | parser, list editing and import, probes, scheduler, statistics, measurements, traceroute, port check, exports. No UI. |
-| `crates/app` | two programs: `pingtable` (command line, config file, HTTP server) and `pingtable-window` (the Windows window, a WebView2 frame around the same interface) |
+| `crates/app` | two programs: `pingtable` (command line, config file, HTTP server, MCP server) and `pingtable-window` (the Windows window, a WebView2 frame around the same interface) |
 | `crates/app/assets` | Windows icon and manifest; the icon is drawn by `scripts/make-icon.py` |
 | `ui/` | the interface: plain HTML, CSS and JavaScript, no build step. Compiled into the binary. |
 | `site/` | the pingtable.net page: plain HTML, CSS and JavaScript, no build step, same two looks as the app |
+| `docs/` | the guide for AI agents, the API reference, and the release how-tos (signing, winget, Store) |
+| `packaging/` | the Microsoft Store package description |
 | `brand/` | theme record, the icon options sheet, and the images used on GitHub |
 
 While working on the interface, serve it from disk so a browser refresh picks
@@ -295,7 +332,7 @@ scripts/build-windows.sh
 |---|---|
 | `pingtable.exe` | the window app |
 | `WebView2Loader.dll` | Microsoft's loader for the window; keep it beside `pingtable.exe` |
-| `pingtable-cli.exe` | the command-line program: `once`, `ports`, or the table in a browser |
+| `pingtable-cli.exe` | the command-line program: `once`, `ports`, `api`, `mcp`, or the table in a browser |
 
 To make the zip for a release, with the license, notices and disclaimer
 inside and the notes for the release page beside it:
@@ -303,6 +340,14 @@ inside and the notes for the release page beside it:
 ```bash
 scripts/package-windows.sh
 ```
+
+Three more steps belong to a release, each with its own page:
+
+| Step | Script | Page |
+|---|---|---|
+| Sign the programs so Windows shows the publisher | `scripts/sign-windows.sh` (run by the package script once set up) | [docs/signing.md](docs/signing.md) |
+| List the release in winget | `scripts/winget-manifest.sh` | [docs/winget.md](docs/winget.md) |
+| Pack the Microsoft Store build | `scripts/package-msix.sh` | [docs/store.md](docs/store.md) |
 
 The window needs the Microsoft Edge WebView2 Runtime, which Windows 11 includes.
 Without it, pingtable opens in the default browser instead. A `pingtable.json`
@@ -313,9 +358,10 @@ No installer and no administrator rights are needed: the folder can sit
 anywhere the user can write, pinging uses the unprivileged Windows ICMP API,
 and the program listens only on the loopback address.
 
-The executables are not code-signed, so Windows may warn about an unknown
-publisher when they are downloaded from the internet, and a policy that blocks
-unsigned programs will block them.
+The released executables are not code-signed yet, so Windows may warn about an
+unknown publisher when they are downloaded from the internet, and a policy that
+blocks unsigned programs will block them. The signing step is ready and waits
+for a signing account ([docs/signing.md](docs/signing.md)).
 
 ## Security and privacy
 

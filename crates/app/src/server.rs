@@ -139,6 +139,48 @@ pub fn is_pingtable(port: u16, token: &str) -> bool {
     reply.starts_with("HTTP/1.1 200") && reply.contains("\"version\"")
 }
 
+/// One call to the API of a pingtable running on this computer. Returns the
+/// HTTP status and the body. An error means nothing answered on the port.
+pub fn call_local(port: u16, token: &str, method: &str, path: &str, body: Option<&str>) -> Result<(u16, String), String> {
+    use std::io::Write;
+    use std::net::{SocketAddr, TcpStream};
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(2)).map_err(|why| why.to_string())?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+    // HTTP/1.0 asks for a plain body: no chunks to put back together.
+    let mut request = format!("{method} {path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nX-Pingtable-Token: {token}\r\nConnection: close\r\n");
+    if let Some(body) = body {
+        request.push_str(&format!("Content-Type: application/json\r\nContent-Length: {}\r\n", body.len()));
+    }
+    request.push_str("\r\n");
+    request.push_str(body.unwrap_or(""));
+    stream.write_all(request.as_bytes()).map_err(|why| why.to_string())?;
+    let mut raw = Vec::new();
+    stream.take(64 * 1024 * 1024).read_to_end(&mut raw).map_err(|why| why.to_string())?;
+    let reply = String::from_utf8_lossy(&raw);
+    let (head, text) = reply.split_once("\r\n\r\n").ok_or("the reply was not HTTP")?;
+    let status: u16 = head.split_whitespace().nth(1).and_then(|code| code.parse().ok()).ok_or("the reply had no status")?;
+    let chunked = head.lines().any(|line| {
+        let line = line.to_ascii_lowercase();
+        line.starts_with("transfer-encoding:") && line.contains("chunked")
+    });
+    Ok((status, if chunked { unchunk(text) } else { text.to_string() }))
+}
+
+/// Put a chunked HTTP body back together.
+fn unchunk(mut text: &str) -> String {
+    let mut whole = String::new();
+    while let Some((size, rest)) = text.split_once("\r\n") {
+        let Ok(size) = usize::from_str_radix(size.split(';').next().unwrap_or("").trim(), 16) else { break };
+        if size == 0 || rest.len() < size || !rest.is_char_boundary(size) {
+            break;
+        }
+        whole.push_str(&rest[..size]);
+        text = rest[size..].trim_start_matches("\r\n");
+    }
+    whole
+}
+
 /// Open a link in the default browser.
 pub fn open_browser(url: &str) {
     use std::process::{Command, Stdio};
@@ -836,6 +878,13 @@ fn api(ctx: &Ctx, mut request: Request, path: &str, query: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_chunked_body_is_put_back_together() {
+        assert_eq!(unchunk("5\r\nhello\r\n6; note\r\n world\r\n0\r\n\r\n"), "hello world");
+        assert_eq!(unchunk(""), "");
+        assert_eq!(unchunk("zz\r\nbroken"), "");
+    }
 
     #[test]
     fn ports_are_gathered_from_every_place_once() {

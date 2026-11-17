@@ -10,13 +10,21 @@
 # VERSION is the workspace version in Cargo.toml. The notes take their list of
 # changes from that version's section of CHANGELOG.md, so write that first.
 #
-#   scripts/package-windows.sh             build, then package
+# The programs are signed first when signing is set up (docs/signing.md), and
+# the readme and the notes say whether they are.
+#
+#   scripts/package-windows.sh             build, sign if set up, then package
 #   scripts/package-windows.sh --no-build  package what is already in dist/windows
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [ "${1:-}" != "--no-build" ]; then
     scripts/build-windows.sh
+    if scripts/sign-windows.sh --configured; then
+        scripts/sign-windows.sh
+    else
+        echo "package-windows: signing is not set up, so these programs are unsigned (docs/signing.md)"
+    fi
 fi
 
 python3 -I - <<'PY'
@@ -65,6 +73,12 @@ The command line
     pingtable-cli
         run without the window and show the table in your browser
 
+    pingtable-cli mcp
+        serve the checks to an AI agent (Model Context Protocol)
+
+    pingtable-cli api
+        show the address and token of the local API, with examples
+
     pingtable-cli --help
         every command and option
 
@@ -73,8 +87,7 @@ The command line
   for output a program can read.
 
 Good to know
-  The programs are not code-signed yet, so Windows may show an "unknown
-  publisher" warning the first time you run them.
+  @SIGNING@
   Settings are kept in %APPDATA%\\pingtable. To keep them beside the program
   instead, put a file named pingtable.json in this folder.
 
@@ -84,6 +97,29 @@ test. Read DISCLAIMER.txt before you use it.
 
 Copyright 2026 Lorincz LLC. pingtable@lorincz.llc
 '''
+
+# Signed only if the note from scripts/sign-windows.sh names these exact files.
+def is_signed():
+    note = root / 'dist' / 'windows' / 'SIGNED.txt'
+    if not note.is_file():
+        return False
+    recorded = {}
+    for line in note.read_text().splitlines()[1:]:
+        digest, _, path = line.partition('  ')
+        recorded[path.strip()] = digest.strip()
+    for program in ('pingtable.exe', 'pingtable-cli.exe'):
+        path = root / 'dist' / 'windows' / program
+        if not path.is_file() or recorded.get(f'dist/windows/{program}') != hashlib.sha256(path.read_bytes()).hexdigest():
+            return False
+    return True
+
+signed = is_signed()
+if signed:
+    readme = readme.replace('@SIGNING@', 'The programs are signed by Lorincz LLC. Windows shows that name when you\n  run them.')
+    signing_note = 'The programs are signed by Lorincz LLC.'
+else:
+    readme = readme.replace('@SIGNING@', 'The programs are not code-signed yet, so Windows may show an "unknown\n  publisher" warning the first time you run them.')
+    signing_note = 'The programs are not code-signed yet, so Windows may show an "unknown publisher" warning the first time.'
 
 def windows_text(text):
     """Text files in the zip use Windows line ends, so any editor shows them properly."""
@@ -113,7 +149,7 @@ digest = hashlib.sha256(out.read_bytes()).hexdigest()
 
 **Download:** `{name}` below, for Windows 10 and 11 (64-bit). Unpack it anywhere and double-click `pingtable.exe`. No installer and no administrator rights are needed.
 
-The programs are not code-signed yet, so Windows may show an "unknown publisher" warning the first time.
+{signing_note}
 
 SHA-256 of the zip: `{digest}`
 
@@ -122,7 +158,7 @@ What it does is described in the [README]({source}#readme).
 pingtable is provided "as is", without warranty of any kind, and you use it at your own risk. Use it only on networks and hosts you own or are authorised to test. Full text: [DISCLAIMER.md]({source}/blob/main/DISCLAIMER.md).
 ''')
 
-print(f'{out}  {out.stat().st_size} bytes')
+print(f'{out}  {out.stat().st_size} bytes  ({"signed" if signed else "unsigned"})')
 print(f'sha256  {digest}')
 with zipfile.ZipFile(out) as z:
     for item in z.infolist():
