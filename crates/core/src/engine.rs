@@ -2908,10 +2908,11 @@ mod tests {
             let l = TcpListener::bind("127.0.0.1:0").unwrap();
             l.local_addr().unwrap().port()
         };
-        let settings = Settings { repeat: false, ..quick_settings() };
+        // Allow the native TCP stack to finish its closed-port connection attempts.
+        let settings = Settings { repeat: false, timeout_ms: 30_000, ..quick_settings() };
         let engine = Engine::new(settings, &format!("127.0.0.1:{open} 127.0.0.1:{closed}"));
         engine.start();
-        assert!(engine.wait_idle(Duration::from_secs(10)));
+        assert!(engine.wait_idle(Duration::from_secs(40)));
         let snap = engine.snapshot(0);
         assert!(snap.full);
         assert!(!snap.running, "a no-repeat run stops by itself");

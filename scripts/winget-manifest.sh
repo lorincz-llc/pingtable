@@ -16,7 +16,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python3 -I - "${1:-}" <<'PY'
+python3 -I - "${1:-}" "${2:-}" <<'PY'
 import datetime, hashlib, pathlib, re, sys
 
 root = pathlib.Path('.')
@@ -24,13 +24,17 @@ version = sys.argv[1] or re.search(r'^version = "([^"]+)"', (root / 'Cargo.toml'
 if not re.fullmatch(r'\d+\.\d+\.\d+', version):
     sys.exit(f'winget-manifest: "{version}" is not a version like 1.2.3')
 
+tag = sys.argv[2] or ('v0.4.0+build.1' if version == '0.4.0' else 'v' + version)
+if not re.fullmatch('v' + re.escape(version) + r'(?:\+build\.[0-9]+)?', tag):
+    sys.exit('winget-manifest: the release tag must match the version')
+
 identifier = 'LorinczLLC.pingtable'
 schema = '1.28.0'  # the schema the community repository asks for
 source = 'https://github.com/lorincz-llc/pingtable'
 zip_name = f'pingtable-{version}-windows-x64.zip'
 zip_path = root / 'dist' / zip_name
 if not zip_path.is_file():
-    sys.exit(f'winget-manifest: dist/{zip_name} is missing. Build it, or download it from {source}/releases/tag/v{version}')
+    sys.exit(f'winget-manifest: dist/{zip_name} is missing. Build it, or download it from {source}/releases/tag/{tag}')
 digest = hashlib.sha256(zip_path.read_bytes()).hexdigest().upper()
 
 # The day the version was released, from the changelog; today if it is not there.
@@ -62,7 +66,7 @@ ArchiveBinariesDependOnPath: true
 ReleaseDate: {released}
 Installers:
 - Architecture: x64
-  InstallerUrl: {source}/releases/download/v{version}/{zip_name}
+  InstallerUrl: {source}/releases/download/{tag}/{zip_name}
   InstallerSha256: {digest}
 ManifestType: installer
 ManifestVersion: {schema}
@@ -93,7 +97,7 @@ Tags:
 - traceroute
 - cli
 - mcp
-ReleaseNotesUrl: {source}/releases/tag/v{version}
+ReleaseNotesUrl: {source}/releases/tag/{tag}
 ManifestType: defaultLocale
 ManifestVersion: {schema}
 ''',

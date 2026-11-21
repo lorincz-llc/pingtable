@@ -501,7 +501,9 @@ mod tests {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             listener.local_addr().unwrap()
         };
-        let o = tcp(addr, &ProbeParams::default());
+        // Windows can retry a refused loopback connection before reporting the socket error.
+        let params = ProbeParams { timeout: Duration::from_secs(30), ..ProbeParams::default() };
+        let o = tcp(addr, &params);
         assert_eq!(o.status, Status::Refused);
         assert_eq!(o.rtt_us, None);
     }

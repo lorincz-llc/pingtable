@@ -44,7 +44,7 @@ jobs:
           INPUT_TAG: ${{ inputs.tag }}
         run: |
           tag=${INPUT_TAG:-${GITHUB_REF_NAME#release/}}
-          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(\+build\.[0-9]+)?$ ]]
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -57,7 +57,7 @@ jobs:
         shell: bash
         run: |
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"])')
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$RELEASE_TAG" == "v$version" ]]
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "${RELEASE_TAG%%+*}" == "v$version" ]]
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Install Rust and MinGW
         run: |
@@ -76,6 +76,7 @@ jobs:
           scripts/package-windows.sh
           cd dist
           version=${RELEASE_TAG#v}
+          version=${version%%+*}
           native="pingtable-$version-windows-x64.zip"
           browser="pingtable-$version-browser-windows-x64.zip"
           sha256sum -- "$native" "$browser" > SHA256SUMS
@@ -120,7 +121,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = $env:RELEASE_TAG.Substring(1)
+          $version = $env:RELEASE_TAG.Substring(1).Split('+')[0]
           $native = "pingtable-$version-windows-x64.zip"
           $browser = "pingtable-$version-browser-windows-x64.zip"
           $notes = Get-Content -Raw dist/release-notes.md
@@ -182,6 +183,7 @@ jobs:
           set -euo pipefail
           tag=$RELEASE_TAG
           version=${tag#v}
+          version=${version%%+*}
           # Follow annotated tags to their commit before creating or resuming a release.
           ref=$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq '.object | [.type, .sha] | @tsv')
           read -r kind sha <<< "$ref"
@@ -225,4 +227,4 @@ jobs:
             fi
           done
           verify_published
-          gh release edit "$tag" --draft=false --notes-file release-notes.md
+          gh release edit "$tag" --draft=false --latest --notes-file release-notes.md

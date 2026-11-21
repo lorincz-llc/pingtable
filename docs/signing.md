@@ -5,7 +5,7 @@ Pingtable publishes two free Windows ZIPs from a version tag. Both carry the ful
 ## Publish a release
 
 1. Set the workspace version in `Cargo.toml`, update `Cargo.lock`, and add the matching version section to `CHANGELOG.md`. Refresh third-party notices after changes to dependencies, bundled fonts or the Windows loader.
-2. Commit the reviewed changes and push that commit to the release branch. Create an annotated tag on the intended commit and push only that tag. For example, the 0.4.0 tag is `v0.4.0`.
+2. Commit the reviewed changes and push that commit to the release branch. Create an annotated tag on the intended commit and push only that tag. The 0.4.0 release tag is `v0.4.0+build.1`. A build revision preserves earlier tags if validation requires changes before the first publication.
 3. Watch **Actions → Release** for the tag. Ubuntu tests the tagged sources, cross-builds both editions with MinGW, checks their SHA-256 digests and records build provenance. A Windows runner opens each archive, checks the digest and Authenticode status, runs each packaged CLI with `--version`, and runs the workspace tests and Clippy.
 4. The publish job takes the exact artifact tested on Windows. It checks the assets in a draft, then publishes the generated release notes, both ZIPs, both individual checksum files and `SHA256SUMS`. Use the published ZIPs for any package-manager submission.
 
@@ -21,8 +21,8 @@ Run these commands in the directory containing both ZIPs and the release’s `SH
 
 ```bash
 sha256sum --check SHA256SUMS
-gh attestation verify pingtable-0.4.0-windows-x64.zip --repo lorincz-llc/pingtable --source-ref refs/tags/v0.4.0 --signer-workflow lorincz-llc/pingtable/.github/workflows/release.yml
-gh attestation verify pingtable-0.4.0-browser-windows-x64.zip --repo lorincz-llc/pingtable --source-ref refs/tags/v0.4.0 --signer-workflow lorincz-llc/pingtable/.github/workflows/release.yml
+gh attestation verify pingtable-0.4.0-windows-x64.zip --repo lorincz-llc/pingtable --source-ref refs/tags/v0.4.0+build.1 --signer-workflow lorincz-llc/pingtable/.github/workflows/release.yml
+gh attestation verify pingtable-0.4.0-browser-windows-x64.zip --repo lorincz-llc/pingtable --source-ref refs/tags/v0.4.0+build.1 --signer-workflow lorincz-llc/pingtable/.github/workflows/release.yml
 ```
 
 The digest checks the downloaded bytes. Attestation verification also checks the repository, workflow and source tag. Authenticode separately identifies the executable’s publisher to Windows. GitHub supports public-repository attestations. Private repositories on a plan with attestation support can set `ENABLE_PRIVATE_ATTESTATIONS=true` to enable the same workflow step. [Artifact attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations) · [GitHub CLI verification options](https://cli.github.com/manual/gh_attestation_verify)
