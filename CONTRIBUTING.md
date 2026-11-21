@@ -26,6 +26,12 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
   No real host names, addresses or personal details.
 - Add a line to [CHANGELOG.md](CHANGELOG.md) for anything a user would notice.
 
+## Maintaining releases
+
+Dependabot opens weekly update PRs for Cargo and GitHub Actions. Review each change and its upstream release notes. After a dependency update, regenerate the Windows notices with `python3 scripts/third-party.py`, review the attribution changes, and commit the matching `Cargo.lock`. CI runs the locked workspace tests, Clippy and the RustSec audit.
+
+If an advisory applies to a transitive dependency, check the active dependency tree for each supported target. Cargo can keep optional platform dependencies in the lockfile even when the release builds do not link them. Document the affected target and test the update before publishing. Follow the [release and signing guide](docs/signing.md) for tagged builds.
+
 ## Whose work it is
 
 By sending a contribution you agree that it is licensed under the
