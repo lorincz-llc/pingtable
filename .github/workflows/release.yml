@@ -3,12 +3,19 @@ name: Release
 on:
   push:
     tags: ['v*']
+    branches: ['release/v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -27,15 +34,31 @@ jobs:
       artifact-metadata: write
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
+      commit: ${{ steps.version.outputs.commit }}
+      tag: ${{ steps.ref.outputs.tag }}
     steps:
+      - name: Resolve the existing release tag
+        id: ref
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          tag=${INPUT_TAG:-${GITHUB_REF_NAME#release/}}
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: refs/tags/${{ steps.ref.outputs.tag }}
       - name: Check version
+        id: version
+        env:
+          RELEASE_TAG: ${{ steps.ref.outputs.tag }}
         shell: bash
         run: |
           version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"])')
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$GITHUB_REF_NAME" == "v$version" ]]
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$RELEASE_TAG" == "v$version" ]]
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Install Rust and MinGW
         run: |
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component clippy --component rust-docs --target x86_64-pc-windows-gnu --no-self-update
@@ -47,10 +70,12 @@ jobs:
           cargo test --workspace --locked
           cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Package both Windows editions
+        env:
+          RELEASE_TAG: ${{ steps.ref.outputs.tag }}
         run: |
           scripts/package-windows.sh
           cd dist
-          version=${GITHUB_REF_NAME#v}
+          version=${RELEASE_TAG#v}
           native="pingtable-$version-windows-x64.zip"
           browser="pingtable-$version-browser-windows-x64.zip"
           sha256sum -- "$native" "$browser" > SHA256SUMS
@@ -78,11 +103,14 @@ jobs:
     name: Test Windows and the packaged executables
     needs: build
     runs-on: windows-2025
+    env:
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ needs.build.outputs.commit }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.build.outputs.artifact }}
@@ -92,7 +120,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $version = $env:RELEASE_TAG.Substring(1)
           $native = "pingtable-$version-windows-x64.zip"
           $browser = "pingtable-$version-browser-windows-x64.zip"
           $notes = Get-Content -Raw dist/release-notes.md
@@ -148,10 +176,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          BUILT_COMMIT: ${{ needs.build.outputs.commit }}
         run: |
           set -euo pipefail
-          tag=$GITHUB_REF_NAME
+          tag=$RELEASE_TAG
           version=${tag#v}
+          # Follow annotated tags to their commit before creating or resuming a release.
+          ref=$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq '.object | [.type, .sha] | @tsv')
+          read -r kind sha <<< "$ref"
+          while [[ "$kind" == tag ]]; do
+            ref=$(gh api "repos/$GH_REPO/git/tags/$sha" --jq '.object | [.type, .sha] | @tsv')
+            read -r kind sha <<< "$ref"
+          done
+          [[ "$kind" == commit && "$sha" == "$BUILT_COMMIT" ]]
           native="pingtable-$version-windows-x64.zip"
           browser="pingtable-$version-browser-windows-x64.zip"
           assets=("$native" "$browser" "$native.sha256" "$browser.sha256" SHA256SUMS)
