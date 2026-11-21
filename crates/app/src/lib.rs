@@ -9,7 +9,7 @@
 //!   in its own window.
 
 /// Who pingtable is credited to. Shown in the About box and in the exe details.
-pub const CREDITS: &str = "pingtable@lorincz.llc";
+pub const CREDITS: &str = "hello@pingtable.net";
 
 /// The project's home on the web.
 pub const WEBSITE: &str = "https://pingtable.net";

@@ -94,4 +94,4 @@ Nothing in this repository is legal, security or compliance advice.
 
 ## Contact
 
-pingtable@lorincz.llc
+hello@pingtable.net

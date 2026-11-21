@@ -95,7 +95,7 @@ pingtable is provided "as is", without warranty of any kind, and you use it at
 your own risk. Use it only on networks and hosts you own or are authorised to
 test. Read DISCLAIMER.txt before you use it.
 
-Copyright 2026 Lorincz LLC. pingtable@lorincz.llc
+Copyright 2026 Lorincz LLC. hello@pingtable.net
 '''
 
 # Signed only if the note from scripts/sign-windows.sh names these exact files.

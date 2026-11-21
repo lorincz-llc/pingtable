@@ -2,7 +2,7 @@
 
 ## Reporting a problem
 
-Email **pingtable@lorincz.llc**. Please do not open a public issue for a
+Email **support@pingtable.net**. Please do not open a public issue for a
 security problem.
 
 Say which version you have (the About box, or `pingtable-cli --version`), what

@@ -480,7 +480,7 @@ service; the rest stays the same.
 - Alert commands are run by the system shell. Values substituted into them
   (`%HostName%` and the rest) are reduced to plain characters first, so text
   from an imported file cannot add commands of its own.
-- Please report a security problem privately to pingtable@lorincz.llc rather
+- Please report a security problem privately to support@pingtable.net rather
   than in a public issue. More in [SECURITY.md](SECURITY.md).
 
 ## Disclaimer
@@ -513,4 +513,4 @@ are not licensed for use as your own name or brand (section 6 of the license).
 
 ## Credits
 
-pingtable@lorincz.llc
+hello@pingtable.net
