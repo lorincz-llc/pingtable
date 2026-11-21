@@ -1,4 +1,4 @@
-# pingtable
+# <img src="brand/github/avatar.png" width="54" height="54" align="absmiddle" alt=""> pingtable
 
 [pingtable.net](https://pingtable.net)
 

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Pingtable">
+  <rect width="64" height="64" rx="10" fill="#0b151a"/>
+  <path fill="#2fd6e1" fill-rule="evenodd"
+        d="M12 12h32l8 8v10l-8 8H22v14H12zm10 9v8h18l3-3v-2l-3-3z"/>
+  <path fill="#2fd6e1" d="M27 44h7v8h-7z"/>
+  <path fill="#1596a6" d="M37 44h7v8h-7z"/>
+  <path fill="#ffbf45" fill-rule="evenodd" d="M47 44h8v8h-8zm2 2v4h4v-4z"/>
+</svg>
