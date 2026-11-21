@@ -136,7 +136,7 @@ fn parse_args() -> Result<Args, String> {
 /// Start the engine and server, or find the pingtable that already runs.
 /// Returns the link to show and the port it is on.
 fn start_or_attach(args: &Args) -> Result<(String, u16), String> {
-    let (path, mut cfg) = config::load(args.config.as_deref());
+    let (path, mut cfg) = config::load(args.config.as_deref())?;
     if let Some(port) = args.port {
         cfg.set_port(port);
     }
@@ -145,14 +145,16 @@ fn start_or_attach(args: &Args) -> Result<(String, u16), String> {
     engine.mute_keys(&cfg.muted);
     match server::start(engine.clone(), cfg, path) {
         Ok(running) => {
-            if autostart && !engine.snapshot(0).hosts.is_empty() {
-                engine.start();
-            }
-            Ok((running.url, port))
+            server::autostart(&engine, autostart);
+            Ok((running.url, running.port))
         }
-        Err(server::StartError::PortInUse) if server::is_pingtable(port, &token) => {
+        // Only a pingtable that proves it holds the token is shown, and given it.
+        Err(server::StartError::PortInUse) => {
             engine.shutdown();
-            Ok((server::link(port, &token), port))
+            match server::prove(port, &token) {
+                Ok(()) => Ok((server::link(port, &token), port)),
+                Err(why) => Err(format!("pingtable could not start.\n\n{}", server::port_taken(port, &why))),
+            }
         }
         Err(why) => Err(format!("pingtable could not start.\n\nPort {port}: {why}.")),
     }
@@ -197,8 +199,9 @@ fn run() -> Result<(), String> {
         // Links to a host ("Open http://nas.lan") go to the default browser.
         .with_new_window_req_handler(|target, _| {
             let web = target.starts_with("http://") || target.starts_with("https://");
-            // Host links are plain; refuse anything a command shell could misread.
-            let plain = target.chars().all(|c| c.is_ascii_alphanumeric() || ":/.[]_-".contains(c));
+            // Those links are plain; refuse anything a command shell could misread.
+            // `#` is not special to cmd, has one.
+            let plain = target.chars().all(|c| c.is_ascii_alphanumeric() || ":/.[]_-#".contains(c));
             if web && plain {
                 server::open_browser(&target);
             }

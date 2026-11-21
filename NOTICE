@@ -1,9 +1,13 @@
 pingtable
 Copyright 2026 Lorincz LLC
 
-This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+Lorincz LLC licenses the original pingtable code under the Apache License,
+Version 2.0. Third-party materials retain their own notices and terms.
 
-The Windows package includes WebView2Loader.dll, part of the Microsoft Edge
-WebView2 SDK, Copyright (C) Microsoft Corporation, redistributed under the
-terms of that SDK. Other third-party components are listed in
-THIRD-PARTY-NOTICES.md.
+The interface includes Latin subsets of JetBrains Mono.
+Copyright 2020 The JetBrains Mono Project Authors. SIL Open Font License 1.1.
+
+The native-window Windows package includes Microsoft's WebView2Loader.dll.
+Copyright (C) Microsoft Corporation. All rights reserved.
+
+See THIRD-PARTY-NOTICES.md for the accompanying licenses and attributions.

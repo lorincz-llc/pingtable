@@ -6,7 +6,12 @@
 //! * `example.com:443`, `192.168.1.10:22`, `[2001:db8::1]:443` TCP connect
 //! * `https://example.com/path`                               TCP 443 (http is 80)
 //! * `192.168.1.10-192.168.1.20`                              IPv4 range
-//! * `192.168.1.0/24`                                         IPv4 CIDR block
+//! * `192.168.1.0/24`                                         IPv4 CIDR block, /16 or smaller
+//!
+//! Hosts from a range or a block are pinged every [`BLOCK_EVERY_SECS`] seconds
+//! unless an `every=` says otherwise. A name that ends in a number, such as
+//! `10.0.0.010`, is refused: the system resolver would read it as some other
+//! address.
 //!
 //! Lines starting with `#` are comments. A line `Group: name` puts the
 //! targets after it into that group.
@@ -25,6 +30,12 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 /// Hard cap on the number of targets one list may expand to.
 pub const MAX_HOSTS: usize = 65_536;
+
+/// Hosts from an address block or range are pinged this often, in seconds,
+/// unless the list gives them or their group an interval of its own, or the
+/// global interval is longer. A block often holds many addresses nobody
+/// answers on, and on a local network each of those costs a broadcast.
+pub const BLOCK_EVERY_SECS: u32 = 30;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -57,6 +68,9 @@ pub struct ParsedHost {
     pub overrides: Overrides,
     /// The line of the list this host came from, counting from 1.
     pub line: usize,
+    /// True when the host is one address of a block or range written as one
+    /// entry. See [`BLOCK_EVERY_SECS`].
+    pub from_block: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -111,6 +125,7 @@ pub fn parse_host_list(text: &str, opts: &ParseOptions) -> ParseReport {
         for (spec, description, own) in items {
             match expand_spec(spec, opts) {
                 Ok(entries) => {
+                    let from_block = entries.len() > 1;
                     for (host, addr, probe) in entries {
                         if report.hosts.len() >= MAX_HOSTS {
                             report
@@ -133,6 +148,7 @@ pub fn parse_host_list(text: &str, opts: &ParseOptions) -> ParseReport {
                             tags,
                             overrides: own.overrides.clone().or(group_opts.overrides.clone()),
                             line: line_no,
+                            from_block,
                         });
                     }
                 }
@@ -341,8 +357,17 @@ fn expand_spec(spec: &str, opts: &ParseOptions) -> Result<Vec<Entry>, String> {
     if let Some((base, bits)) = host_part.split_once('/') {
         let base: Ipv4Addr = base.parse().map_err(|_| "CIDR blocks must start with an IPv4 address")?;
         let bits: u32 = bits.parse().map_err(|_| "prefix length is not a number")?;
-        if !(8..=32).contains(&bits) {
-            return Err("prefix length must be between 8 and 32".into());
+        if bits > 32 {
+            return Err("prefix length must be 32 or less".into());
+        }
+        // Refused before it is expanded: a /8 alone is 16.7 million entries.
+        let size = 1u64 << (32 - bits);
+        if size > MAX_HOSTS as u64 {
+            return Err(format!(
+                "a /{bits} block has {} addresses, more than the {} a list can hold; split it into blocks of /16 or smaller",
+                grouped(size),
+                grouped(MAX_HOSTS as u64)
+            ));
         }
         let mask: u32 = if bits == 32 { u32::MAX } else { !(u32::MAX >> bits) };
         let mut first = u32::from(base) & mask;
@@ -359,8 +384,16 @@ fn expand_spec(spec: &str, opts: &ParseOptions) -> Result<Vec<Entry>, String> {
     }
 
     if let Some((a, b)) = host_part.split_once('-') {
-        if let (Ok(a), Ok(b)) = (a.parse::<Ipv4Addr>(), b.parse::<Ipv4Addr>()) {
-            let (a, b) = (u32::from(a), u32::from(b));
+        if let Ok(start) = a.parse::<Ipv4Addr>() {
+            let Ok(end) = b.parse::<Ipv4Addr>() else {
+                // `10.0.0.1-20` would otherwise pass as a name that never resolves.
+                let [x, y, z, _] = start.octets();
+                return Err(match b.parse::<u8>() {
+                    Ok(n) => format!("write both ends of a range in full, as {start}-{x}.{y}.{z}.{n}"),
+                    Err(_) => "write both ends of a range as IPv4 addresses".into(),
+                });
+            };
+            let (a, b) = (u32::from(start), u32::from(end));
             if a > b {
                 return Err("range end is before its start".into());
             }
@@ -375,6 +408,9 @@ fn expand_spec(spec: &str, opts: &ParseOptions) -> Result<Vec<Entry>, String> {
         return Ok(vec![(ip.to_string(), Some(IpAddr::V4(ip)), probe)]);
     }
 
+    if let Some(why) = numeric_name_problem(host_part) {
+        return Err(why);
+    }
     if !is_host_name(host_part) {
         return Err("not a host name or address".into());
     }
@@ -401,6 +437,51 @@ fn is_host_name(text: &str) -> bool {
     text.len() <= 253
         && !text.starts_with(['.', '-'])
         && text.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '.' | '_'))
+}
+
+/// Why `name` cannot be looked up as a name, when it ends in a number.
+///
+/// The system resolver reads such a name as an address in an old shorthand:
+/// `192.168.001.010` is 192.168.1.8 (a leading zero means octal), `192.168.1`
+/// is 192.168.0.1 and `0x7f.1` is 127.0.0.1. No real name ends in a number, so
+/// it is refused rather than pinging an address nobody wrote. None for an
+/// ordinary name. Check for a plain address first: `10.0.0.1` ends in a number too.
+pub fn numeric_name_problem(name: &str) -> Option<String> {
+    let name = name.strip_suffix('.').unwrap_or(name);
+    let labels: Vec<&str> = name.split('.').collect();
+    let decimal = |label: &str| !label.is_empty() && label.bytes().all(|b| b.is_ascii_digit());
+    let hex = |label: &str| {
+        label.strip_prefix("0x").or_else(|| label.strip_prefix("0X")).is_some_and(|digits| digits.bytes().all(|b| b.is_ascii_hexdigit()))
+    };
+    let last = labels.last().copied().unwrap_or("");
+    if !decimal(last) && !hex(last) {
+        return None;
+    }
+    if labels.len() == 4 && labels.iter().all(|l| decimal(l)) {
+        let plain: Vec<&str> = labels.iter().map(|l| if l.trim_start_matches('0').is_empty() { "0" } else { l.trim_start_matches('0') }).collect();
+        let plain = plain.join(".");
+        if plain.parse::<Ipv4Addr>().is_ok() {
+            return Some(if labels.iter().any(|l| l.len() > 1 && l.starts_with('0')) {
+                format!("an address cannot have leading zeros, which would be read as octal; write {plain}")
+            } else {
+                format!("write the address as {plain}")
+            });
+        }
+    }
+    Some("a name cannot end in a number, and an IPv4 address is four numbers from 0 to 255 without leading zeros".into())
+}
+
+/// `16777216` as `16,777,216`.
+fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 fn strip_prefix_ignore_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
@@ -517,6 +598,62 @@ mod tests {
         let r = simple("10.0.0.0/16 10.1.0.0/16");
         assert_eq!(r.hosts.len(), MAX_HOSTS);
         assert!(r.warnings.iter().any(|w| w.contains("Stopped at")));
+    }
+
+    #[test]
+    fn a_block_too_big_for_a_list_is_refused_before_it_is_expanded() {
+        // A /8 is 16.7 million addresses. Expanded first and cut down after, it
+        // took over a gigabyte, and a failed allocation ends the process.
+        let r = simple("10.0.0.0/8 192.168.1.1");
+        assert_eq!(hosts(&r), ["192.168.1.1"]);
+        assert_eq!(r.warnings, ["Line 1: \"10.0.0.0/8\" skipped: a /8 block has 16,777,216 addresses, more than the 65,536 a list can hold; split it into blocks of /16 or smaller."]);
+        let r = simple("10.0.0.0/15:22 172.16.0.0/0 10.0.0.0/33");
+        assert!(r.hosts.is_empty());
+        assert_eq!(r.warnings.len(), 3, "{:?}", r.warnings);
+        assert!(r.warnings[1].contains("4,294,967,296"), "{:?}", r.warnings);
+        // The largest block that fits is still taken whole.
+        let opts = ParseOptions { cidr_skip_first: false, cidr_skip_last: false, ..Default::default() };
+        assert_eq!(parse_host_list("10.0.0.0/16", &opts).hosts.len(), MAX_HOSTS);
+    }
+
+    #[test]
+    fn names_that_end_in_a_number_are_refused() {
+        // The system resolver reads these as addresses in an old shorthand and
+        // would ping something else: 192.168.1.8 for the first.
+        let r = simple("192.168.001.010 10.0.0.010 10.0.0.1.");
+        assert!(r.hosts.is_empty());
+        assert_eq!(
+            r.warnings,
+            [
+                "Line 1: \"192.168.001.010\" skipped: an address cannot have leading zeros, which would be read as octal; write 192.168.1.10.",
+                "Line 1: \"10.0.0.010\" skipped: an address cannot have leading zeros, which would be read as octal; write 10.0.0.10.",
+                "Line 1: \"10.0.0.1.\" skipped: write the address as 10.0.0.1.",
+            ]
+        );
+        for odd in ["192.168.1", "10.0.0.256", "8080", "0x7f.1", "0x7f000001", "host.123", "db.123:5432"] {
+            let r = simple(odd);
+            assert!(r.hosts.is_empty(), "{odd} was accepted");
+            assert!(r.warnings[0].contains("without leading zeros"), "{odd}: {:?}", r.warnings);
+        }
+        // Names with numbers in them, but not at the end, are names.
+        let r = simple("host1.lan 10-0-0-1.example 1.example.com 0xcafe.lan server2");
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+        assert_eq!(r.hosts.len(), 5);
+    }
+
+    #[test]
+    fn a_short_range_asks_for_both_ends() {
+        let r = simple("10.0.0.1-20 10.0.0.1-x");
+        assert!(r.hosts.is_empty());
+        assert_eq!(r.warnings[0], "Line 1: \"10.0.0.1-20\" skipped: write both ends of a range in full, as 10.0.0.1-10.0.0.20.");
+        assert!(r.warnings[1].contains("as IPv4 addresses"), "{:?}", r.warnings);
+    }
+
+    #[test]
+    fn hosts_from_a_block_are_marked() {
+        let r = simple("10.0.0.0/30 10.0.0.9-10.0.0.10 10.0.0.20/32 10.0.0.30-10.0.0.30 one.lan");
+        let marks: Vec<bool> = r.hosts.iter().map(|h| h.from_block).collect();
+        assert_eq!(marks, [true, true, true, true, false, false, false]);
     }
 
     #[test]

@@ -4,3 +4,5 @@
 pingtable.json
 signing.env
 store.env
+pingtable.json.*
+__pycache__/

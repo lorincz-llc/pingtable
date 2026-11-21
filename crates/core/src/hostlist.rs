@@ -6,6 +6,7 @@
 
 use crate::parse::{is_option_word, parse_host_list, ParseOptions};
 use serde::Serialize;
+use std::net::Ipv6Addr;
 
 /// The group a `Group:` line starts, without its options. `Some("")` for a
 /// bare `Group:` line, which ends grouping. None for any other line.
@@ -183,6 +184,32 @@ const GROUP_COLUMNS: [&str; 6] = ["group", "folder", "category", "site", "locati
 const PORT_COLUMNS: [&str; 2] = ["port", "tcpport"];
 const TAG_COLUMNS: [&str; 2] = ["tags", "tag"];
 const EVERY_COLUMNS: [&str; 4] = ["every", "interval", "intervalsecs", "intervalseconds"];
+/// pingtable's own export: `icmp` or `tcp:443`, the timeout in milliseconds,
+/// and the packet options as host-list words (`size=1400 ttl=8`).
+const PROBE_COLUMNS: [&str; 1] = ["probe"];
+const TIMEOUT_COLUMNS: [&str; 1] = ["timeoutms"];
+const OPTIONS_COLUMNS: [&str; 1] = ["options"];
+/// The options an `options` column may give. Interval, timeout and tags have columns of their own.
+const PACKET_OPTIONS: [&str; 6] = ["size", "ttl", "df", "tos", "dscp", "data"];
+
+/// A cell a spreadsheet would have run as a formula, as `export::to_csv`
+/// writes it (`'=x`), back to its text.
+fn undo_defuse(cell: &str) -> &str {
+    match cell.strip_prefix('\'') {
+        Some(rest) if rest.starts_with(['=', '+', '-', '@']) => rest,
+        _ => cell,
+    }
+}
+
+/// True when the word is one packet option with a value the host list accepts.
+fn is_packet_option(word: &str) -> bool {
+    let known = word.split_once('=').is_some_and(|(key, _)| PACKET_OPTIONS.contains(&key.to_ascii_lowercase().as_str()));
+    if !known || !is_option_word(word) {
+        return false;
+    }
+    let report = parse_host_list(&format!("x.example {word}"), &ParseOptions { description_format: true, ..ParseOptions::default() });
+    report.warnings.is_empty() && report.hosts.first().is_some_and(|h| h.overrides.shapes_packet())
+}
 
 /// True when the text is one target the host list would accept.
 fn is_target(text: &str) -> bool {
@@ -227,6 +254,8 @@ pub fn import_text(text: &str) -> Import {
     };
     let group_at = if has_header { find(&GROUP_COLUMNS) } else { Some(2) };
     let (port_at, tags_at, every_at) = if has_header { (find(&PORT_COLUMNS), find(&TAG_COLUMNS), find(&EVERY_COLUMNS)) } else { (None, None, None) };
+    let (probe_at, timeout_at, options_at) =
+        if has_header { (find(&PROBE_COLUMNS), find(&TIMEOUT_COLUMNS), find(&OPTIONS_COLUMNS)) } else { (None, None, None) };
 
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
     let mut import = Import {
@@ -244,19 +273,28 @@ pub fn import_text(text: &str) -> Import {
             import.skipped.push(format!("Row {}: no usable host in \"{}\".", index + 1, row.chars().take(60).collect::<String>()));
             continue;
         }
-        let port = cell(port_at);
-        if !port.is_empty() && port.parse::<u16>().is_ok_and(|p| p > 0) && !target.contains("://") && target.matches(':').count() == 0 {
-            target = format!("{target}:{port}");
+        // The port, from a port column or from a `probe` column such as `tcp:443`.
+        let probe = cell(probe_at);
+        let port = match cell(port_at) {
+            "" => probe.get(..4).filter(|kind| kind.eq_ignore_ascii_case("tcp:")).map(|_| &probe[4..]).unwrap_or(""),
+            given => given,
+        };
+        if let Some(port) = port.parse::<u16>().ok().filter(|&p| p > 0) {
+            if !target.contains("://") && !target.contains(':') {
+                target = format!("{target}:{port}");
+            } else if let Ok(v6) = target.parse::<Ipv6Addr>() {
+                target = format!("[{v6}]:{port}");
+            }
         }
         let mut line = target;
-        let description = cell(description_at).split_whitespace().collect::<Vec<_>>().join(" ");
+        let description = undo_defuse(cell(description_at)).split_whitespace().collect::<Vec<_>>().join(" ");
         // A description word with "=" would read as an option; keep such words out.
         let description: Vec<&str> = description.split(' ').filter(|w| !w.is_empty() && !is_option_word(w)).collect();
         if !description.is_empty() {
             line.push(' ');
             line.push_str(&description.join(" "));
         }
-        for tag in cell(tags_at).split([' ', '|', ',']).filter(|t| !t.is_empty() && !t.contains('=')) {
+        for tag in undo_defuse(cell(tags_at)).split([' ', '|', ',']).filter(|t| !t.is_empty() && !t.contains('=')) {
             line.push_str(&format!(" tag={tag}"));
         }
         if let Ok(secs) = cell(every_at).trim_end_matches('s').parse::<u32>() {
@@ -264,7 +302,18 @@ pub fn import_text(text: &str) -> Import {
                 line.push_str(&format!(" every={secs}s"));
             }
         }
-        let group = cell(group_at).split_whitespace().collect::<Vec<_>>().join(" ");
+        if let Ok(ms) = cell(timeout_at).trim_end_matches("ms").parse::<u32>() {
+            if ms > 0 {
+                line.push_str(&format!(" timeout={ms}ms"));
+            }
+        }
+        // Packet options only, and only those the host list takes as they are.
+        for word in cell(options_at).split_whitespace().filter(|w| is_packet_option(w)) {
+            line.push(' ');
+            line.push_str(word);
+        }
+        // A group word with "=" would read as an option of the group; keep such words out.
+        let group = undo_defuse(cell(group_at)).split_whitespace().filter(|w| !is_option_word(w)).collect::<Vec<_>>().join(" ");
         match groups.iter_mut().find(|(name, _)| name.eq_ignore_ascii_case(&group)) {
             Some((_, lines)) => lines.push(line),
             None => groups.push((group, vec![line])),
@@ -411,5 +460,35 @@ mod tests {
     fn description_words_that_look_like_options_are_dropped() {
         let import = import_text("host,description\nx.lan,rack=4 top shelf\n");
         assert_eq!(import.lines, ["x.lan top shelf"]);
+    }
+
+    #[test]
+    fn group_words_that_look_like_options_are_dropped() {
+        // Written into a `Group:` line, they would set an interval or tag for the whole group.
+        let import = import_text("host,group\nx.lan,Lab every=1s tag=all\ny.lan,every=5s\n");
+        assert_eq!(import.lines, ["y.lan", "", "Group: Lab", "x.lan"]);
+        let report = parse_host_list(&import.lines.join("\n"), &ParseOptions { description_format: true, ..ParseOptions::default() });
+        assert!(report.hosts.iter().all(|h| h.overrides.is_empty() && h.tags.is_empty()), "{:?}", report.hosts);
+    }
+
+    #[test]
+    fn probe_and_timeout_columns_are_read() {
+        let csv = "host,probe,timeout_ms,description\n\
+                   web.lan,tcp:443,250,Web\n\
+                   2001:db8::1,tcp:22,,SSH over IPv6\n\
+                   ping.lan,icmp,,\n\
+                   ssh.lan:2222,tcp:22,,Port in the host wins\n\
+                   dash.lan,icmp,,'-minus first\n";
+        let import = import_text(csv);
+        assert_eq!(
+            import.lines,
+            [
+                "web.lan:443 Web timeout=250ms",
+                "[2001:db8::1]:22 SSH over IPv6",
+                "ping.lan",
+                "ssh.lan:2222 Port in the host wins",
+                "dash.lan -minus first"
+            ]
+        );
     }
 }

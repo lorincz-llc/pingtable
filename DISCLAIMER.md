@@ -1,97 +1,17 @@
-# Disclaimer
+# Warranty and liability
 
-This notice covers pingtable: its source code, the programs built from it, the
-files in each release, and the pingtable.net website. It sets out in plain
-words what already applies under the
-[Apache License, Version 2.0](LICENSE). It adds no conditions to that license
-and takes no right away from you. If this notice and the license ever differ,
-the license governs.
+Lorincz LLC distributes the original pingtable software under the Apache License, Version 2.0. Sections 7 through 9 govern warranty, liability and additional commitments. Applicable law and any separate written agreement govern where those sections provide exceptions. This summary adds no license conditions. Third-party components retain their own terms. [Apache License 2.0](LICENSE) · [Third-party notices](THIRD-PARTY-NOTICES.md)
 
-## No warranty
+## Measurements and outages
 
-pingtable is provided "AS IS" and "AS AVAILABLE", WITHOUT WARRANTIES OR
-CONDITIONS OF ANY KIND, express, implied or statutory. That includes, without
-limitation, any warranty or condition of title, non-infringement,
-merchantability, fitness for a particular purpose, accuracy, reliability or
-availability. No statement made by the authors, in any form, creates a
-warranty.
+The software is provided as is, subject to those exceptions. The project gives no assurance of accuracy, availability, timely alerts or fitness for a particular purpose. Firewalls can discard a probe while a service is healthy. A successful probe can coincide with an application outage. Confirm important results independently and provide separate safeguards for safety-critical or business-critical decisions.
 
-In particular, nobody promises that:
+## Operational and security risks
 
-- a measurement, status, alert, report or export is correct, complete or on
-  time;
-- an outage will be noticed, or that a reported outage is real;
-- the software is free of defects, will run without interruption, or is safe
-  for your computers and networks;
-- a downloaded file is free of harmful code. The release files are not
-  code-signed. Compare the published SHA-256, or build from source.
+- Probes, name lookups and repeated connection attempts generate traffic. Address ranges can expand into many destinations. Choose a rate and scope appropriate to the network and obtain authorization to test those systems.
+- Alert commands execute locally with the operating-system permissions of the account running pingtable. Configuration changes, imported labels and a compromised account or API token can affect the commands or destinations involved. Run with ordinary user privileges and restrict access to your settings. [Local controls and private reporting](SECURITY.md)
+- Hosts, addresses, timestamps and other network information may appear in configurations, logs, exports and the clipboard. Protect these records, review them before sharing and keep recoverable copies of important settings and data.
 
-## No liability
+To the extent provided by section 8, the limitation of liability applies to damages arising from use or inability to use pingtable. Examples include loss or corruption of data, missed alerts, network disruption, downtime, unauthorized access or compromise, and resulting business losses. Rights and remedies that applicable law preserves remain available.
 
-TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT AND UNDER NO
-LEGAL THEORY, whether in tort (including negligence), contract or otherwise,
-SHALL LORINCZ LLC, THE AUTHORS OR ANY CONTRIBUTOR BE LIABLE TO YOU FOR ANY
-DAMAGES, including any direct, indirect, special, incidental, consequential,
-exemplary or punitive damages of any character, arising out of the license or
-out of the use of, or the inability to use, pingtable. That includes, without
-limitation, damages for loss of data, loss of profits or goodwill, work
-stoppage, network or service disruption, missed or false alerts, computer
-failure or malfunction, security incidents, regulatory or contractual
-penalties, and claims made by third parties, even if the possibility of such
-damages was known.
-
-Some places do not allow certain warranties to be excluded or certain
-liability to be limited. There, the exclusions above apply to the fullest
-extent the law allows.
-
-## You use it at your own risk
-
-You alone decide whether pingtable suits your purpose, and you carry every
-risk of using it.
-
-- **Permission.** pingtable sends network traffic to every host in your list:
-  ICMP echo requests, TCP connection attempts, route traces and name lookups.
-  A range or an address block can expand to many hosts, and a measurement can
-  send up to ten probes a second to each one. Use it only on networks and
-  hosts you own or have clear permission to test. Probing without permission
-  can breach contracts, acceptable-use policies and the law.
-- **Rules that apply to you.** You are responsible for complying with the
-  laws, regulations, employer and network policies and third-party terms that
-  apply to you, including export and sanctions rules.
-- **Commands.** pingtable can run commands that you set up for alerts. What
-  those commands do is your responsibility.
-- **Your data.** Keep your own copies of anything you need. pingtable stores
-  its settings, host list and mutes, and may lose or overwrite them.
-- **Not for critical use.** pingtable is not designed, tested or intended for
-  any use where a failure or a wrong reading could lead to death, injury, or
-  serious physical, financial or environmental harm. It does not replace a
-  professionally run monitoring service. Do not make it your only safeguard.
-
-## No support and no promise that it continues
-
-Nobody is obliged to provide support, maintenance, fixes, updates or security
-patches, or to keep any feature, file format, API, download or website
-available. pingtable may change or stop at any time without notice.
-
-## Other people's work and names
-
-pingtable includes open-source components and, in the Windows package,
-Microsoft's WebView2 loader. Their own authors provide them under their own
-terms, listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), with no
-warranty from anyone involved in pingtable.
-
-pingtable is an independent project. It is not affiliated with, endorsed by or
-sponsored by Microsoft or by the maker of any other network tool. Product and
-company names appear only to identify those products, for example to say which
-file formats can be imported, and are the trademarks of their owners.
-
-The name "pingtable" and its mark are not licensed for use as your own name or
-brand (section 6 of the license).
-
-## Not advice
-
-Nothing in this repository is legal, security or compliance advice.
-
-## Contact
-
-pingtable@lorincz.llc
+Software downloads and a support address carry no service-level commitment. The status of an individual build's signature and its published digest are documented with that release. Security reports go to [support@pingtable.net](mailto:support@pingtable.net).

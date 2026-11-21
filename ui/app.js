@@ -3,7 +3,8 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const ROW_H = 32;
+// Row height in pixels. app.css holds the value (--row-h, compact or roomy); applyDensity() reads it.
+let ROW_H = 26;
 const SPARK_SLOTS = 60;
 const STATUS_LABEL = {
   ok: 'OK', timeout: 'Timed out', net_unreachable: 'Network unreachable', host_unreachable: 'Host unreachable',
@@ -21,18 +22,30 @@ const STATE_TITLE = {
   up: 'Up', down: 'Down', failing: 'Failing, not yet counted as down', recovering: 'Answering again, not yet counted as up',
   pending: 'No result yet', muted: 'Muted: not pinged, nothing collected',
 };
+const STALE_TITLE = 'This result is old: the host is due and still waiting for a free slot';
+// The state as one word, for badges and copies.
+const STATE_WORD = { up: 'Up', down: 'Down', failing: 'Failing', recovering: 'Recovering', pending: 'Pending', muted: 'Muted' };
 
 // ------------------------------------------------------------------ token
 
 const TOKEN_KEY = 'pingtable.token';
+const savedToken = (() => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } })();
+// A token in the link is used at once but saved only once the server accepts it (the first
+// reply that is not refused), so a stale or mistyped link never replaces a saved token that works.
 const url = new URL(location.href);
-if (url.searchParams.get('t')) {
-  try { localStorage.setItem(TOKEN_KEY, url.searchParams.get('t')); } catch {}
-  var bootToken = url.searchParams.get('t');
+const linkToken = url.searchParams.get('t');
+if (linkToken) {
   url.searchParams.delete('t');
   history.replaceState(null, '', url.pathname + url.search);
 }
-let token = bootToken || (() => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } })();
+let token = linkToken || savedToken;
+let storedToken = savedToken;
+
+/** The server took the token: keep it for the next visit. */
+function keepToken() {
+  if (!token || token === storedToken) return;
+  try { localStorage.setItem(TOKEN_KEY, token); storedToken = token; } catch {}
+}
 
 async function api(path, { method = 'GET', body, raw = false } = {}) {
   const res = await fetch('/api/v1/' + path, {
@@ -41,10 +54,14 @@ async function api(path, { method = 'GET', body, raw = false } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   });
   if (res.status === 401) { $('gate').hidden = false; throw new Error('unauthorized'); }
+  // A reply that worked means the token was accepted. (A 403 comes before the token is looked at.)
+  if (res.ok) keepToken();
   if (!res.ok) {
     let message = res.statusText;
     try { message = (await res.json()).error || message; } catch {}
-    throw new Error(message);
+    const err = new Error(message);
+    err.status = res.status;
+    throw err;
   }
   return raw ? res : res.json();
 }
@@ -55,7 +72,7 @@ const PREFS_KEY = 'pingtable.ui';
 // Raise this when stored preferences change shape or the default columns change.
 const PREFS_VERSION = 5;
 const prefs = Object.assign(
-  { v: 0, cols: null, grouped: true, sound: false, theme: 'light', sort: null, dir: 1, detailH: 320 },
+  { v: 0, cols: null, grouped: true, sound: false, theme: 'light', sort: null, dir: 1, detailH: 320, density: 'compact' },
   (() => { try { return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch { return {}; } })(),
 );
 if (prefs.v !== PREFS_VERSION) {
@@ -88,10 +105,14 @@ function applyTheme() {
   const theme = currentTheme();
   root.dataset.theme = theme;
   const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
-  document.querySelector('meta[name="theme-color"]').content = bg;
+  // The title bar sits right on top of the app's bar, which is the dark console in both looks, so the
+  // frame follows the bar (its color-scheme and background); the page keeps its own background.
+  const bar = getComputedStyle($('bar'));
+  const frameTheme = bar.colorScheme === 'dark' || bar.colorScheme === 'light' ? bar.colorScheme : theme;
+  document.querySelector('meta[name="theme-color"]').content = bar.getPropertyValue('--bg').trim() || bg;
   try { localStorage.setItem('pingtable.theme', prefs.theme); } catch {}
-  // In the Windows window, ask the frame to match (title bar, and the colour shown while loading).
-  try { if (window.ipc) window.ipc.postMessage(JSON.stringify({ theme, bg: bg.length === 4 ? '#' + [...bg.slice(1)].map((ch) => ch + ch).join('') : bg })); } catch {}
+  // In the Windows window, ask the frame to match: the title bar, and the colour shown while loading.
+  try { if (window.ipc) window.ipc.postMessage(JSON.stringify({ theme: frameTheme, bg: bg.length === 4 ? '#' + [...bg.slice(1)].map((ch) => ch + ch).join('') : bg })); } catch {}
   chartDirty = true;
 }
 
@@ -103,6 +124,13 @@ function setTheme(theme) {
 }
 
 const toggleTheme = () => setTheme(currentTheme() === 'light' ? 'dark' : 'light');
+
+/** Compact rows (the default) or roomy ones. app.css sets --row-h for each; virtual scrolling reads it here. */
+function applyDensity() {
+  const root = document.documentElement;
+  root.dataset.density = prefs.density === 'roomy' ? 'roomy' : 'compact';
+  ROW_H = parseFloat(getComputedStyle(root).getPropertyValue('--row-h')) || 26;
+}
 
 // ------------------------------------------------------------- formatting
 
@@ -151,7 +179,7 @@ function fmtSpan(ms) {
 const fmtPct = (p) => (p === 0 ? '0' : p < 10 ? p.toFixed(1) : Math.round(p)) + '%';
 const fmtEvery = (s) => (s % 3600 === 0 ? s / 3600 + 'h' : s % 60 === 0 ? s / 60 + 'm' : s + 's');
 const checkLabel = (p) => (p.kind === 'tcp' ? 'TCP ' + p.port : 'ICMP');
-/** A row's host as it is typed in the list: with its port when the row is a port check. */
+/** A row's host as it is typed in the list: with its port for a TCP monitor. */
 const hostWithPort = (r) => (r.probe.kind !== 'tcp' ? r.host : (r.host.includes(':') ? `[${r.host}]` : r.host) + ':' + r.probe.port);
 const hostCell = (r) => (r.probe.kind !== 'tcp' ? esc(r.host) : `${esc(r.host.includes(':') ? `[${r.host}]` : r.host)}<span class="port">:${r.probe.port}</span>`);
 
@@ -161,9 +189,140 @@ function ipKey(ip) {
   return ip.split('.').map((n) => n.padStart(3, '0')).join('.');
 }
 
+// ----------------------------------------------------------- copy formats
+//
+// Pure functions, no page and no state. A table to copy is
+//   { cols: [{ label, num }], rows: [[cell text, ...]], title?, notes? }
+// with every cell a string ('' when empty). `title` is a line before the
+// table and `notes` lines after it, in text and Markdown only.
+
+const FORMATS = [['text', 'Text'], ['md', 'Markdown'], ['json', 'JSON'], ['tsv', 'TSV']];
+const FORMAT_NAME = { text: 'text', md: 'Markdown', json: 'JSON', tsv: 'TSV' };
+const FORMAT_TITLE = {
+  text: 'Lined-up columns, for a chat, a ticket or a terminal',
+  md: 'A Markdown table, for GitHub, a wiki or notes',
+  json: 'JSON with the API field names, for a program or an AI agent',
+  tsv: 'Tab-separated: paste into Excel or Google Sheets, one value per cell. Numbers have no thousands separator and a "." for the decimal point',
+};
+
+/** One line: tabs, line breaks and other control characters (C0, DEL and C1) become a space. */
+const oneLine = (s) => String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ').trim();
+
+// Characters a monospace font draws in no column (combining marks, format characters such as
+// zero-width spaces and soft hyphens, the vowels and finals of decomposed Hangul) or in two
+// (wide East Asian letters and emoji shown as emoji; the newest emoji block is listed in case the
+// browser's Unicode data is older than the emoji).
+const ZERO_WIDTH = /[\p{M}\p{Cf}\u1160-\u11ff]/u;
+const WIDE = /[\u1100-\u115f\u2e80-\u303e\u3041-\u33ff\u3400-\u4dbf\u4e00-\u9fff\ua000-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6\u{1fa70}-\u{1faff}\u{20000}-\u{3fffd}]/u;
+const SKIN_TONE = /[\u{1f3fb}-\u{1f3ff}]/u;
+const graphemes = typeof Intl === 'object' && Intl.Segmenter ? new Intl.Segmenter('en', { granularity: 'grapheme' }) : null;
+
+/** Columns one character takes, on its own. */
+const charWidth = (ch) => (ZERO_WIDTH.test(ch) ? 0 : WIDE.test(ch) || /\p{Emoji_Presentation}/u.test(ch) ? 2 : 1);
+
+/** Columns one character as people see it takes: an emoji with its skin tone, or a joined family, is one, two wide. */
+function graphemeWidth(g) {
+  if (!g.includes('\ufe0e') && (/\p{Emoji_Presentation}/u.test(g) || /.\ufe0f/u.test(g))) return 2;
+  let w = 0;
+  for (const ch of g) w = Math.max(w, charWidth(ch));
+  return w;
+}
+
+/** How many columns a monospace font gives the text: wide East Asian letters and emoji take two, combining marks none. */
+function textWidth(s) {
+  const text = String(s);
+  let w = 0;
+  if (graphemes) {
+    for (const { segment } of graphemes.segment(text)) w += graphemeWidth(segment);
+  } else {
+    // No grapheme splitter: count each character, with skin tones and joiners taking no room.
+    for (const ch of text) w += SKIN_TONE.test(ch) ? 0 : charWidth(ch);
+  }
+  return w;
+}
+
+/** Plain text with the columns lined up for a monospace font. Numbers are right-aligned; an empty cell is "-". */
+function toText(t) {
+  const rows = t.rows.map((row) => row.map((v) => oneLine(v) || '-'));
+  const head = t.cols.map((c) => oneLine(c.label));
+  const widths = head.map((h, i) => Math.max(textWidth(h), ...rows.map((row) => textWidth(row[i]))));
+  const line = (cells) => cells.map((v, i) => {
+    const gap = ' '.repeat(widths[i] - textWidth(v));
+    return t.cols[i].num ? gap + v : v + gap;
+  }).join('  ').trimEnd();
+  return [...(t.title ? [oneLine(t.title)] : []), line(head), ...rows.map(line), ...(t.notes || []).map(oneLine)].join('\n');
+}
+
+/**
+ * Text that reads the same once Markdown renders it: pipes, backslashes, the marks that would format it,
+ * `&` (which would start an entity such as &amp;) and `$` (GitHub's maths) are escaped.
+ */
+function mdEscape(s) {
+  const word = /[\p{L}\p{N}]/u;
+  return oneLine(s)
+    .replace(/[\\`*|<>[\]~&$]/g, '\\$&')
+    // snake_case stays as it is; an underscore that could start or end emphasis is escaped.
+    .replace(/_/g, (m, i, all) => (word.test(all[i - 1] || '') && word.test(all[i + 1] || '') ? '_' : '\\_'));
+}
+
+/** A GitHub table. Number columns are right-aligned; title and notes are paragraphs around it. */
+function toMarkdown(t) {
+  const row = (cells) => '| ' + cells.map(mdEscape).join(' | ') + ' |';
+  const lines = t.title ? [mdEscape(t.title), ''] : [];
+  lines.push(row(t.cols.map((c) => c.label)), '|' + t.cols.map((c) => (c.num ? ' ---: ' : ' --- ')).join('|') + '|');
+  for (const r of t.rows) lines.push(row(r));
+  // A blank line before each note, or Markdown would run them together into one paragraph.
+  for (const note of t.notes || []) lines.push('', mdEscape(note));
+  return lines.join('\n');
+}
+
+/** A spreadsheet cell: quoted when it holds a double quote, and never taken for a formula. */
+function tsvCell(s) {
+  let v = oneLine(s);
+  if (/^[=+\-@]/.test(v)) v = "'" + v;
+  return v.includes('"') ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+
+/** A number as a spreadsheet reads it everywhere: no thousands separator ("1,234" is 1.234 where a comma is the decimal point). */
+const ungroup = (s) => String(s ?? '').replace(/(\d),(?=\d{3}(?!\d))/g, '$1');
+
+/**
+ * Tab-separated values with a heading row: one value per cell when pasted into a spreadsheet.
+ * Number columns lose their thousands separators; the decimal point stays a ".".
+ */
+const toTsv = (t) => [
+  t.cols.map((c) => tsvCell(c.label)).join('\t'),
+  ...t.rows.map((cells) => cells.map((v, i) => tsvCell(t.cols[i] && t.cols[i].num ? ungroup(v) : v)).join('\t')),
+].join('\n');
+
+/** The table in one format. `stamp` (where and when) ends text and Markdown; a spreadsheet gets only the cells. */
+function renderTable(t, fmt, stamp) {
+  if (fmt === 'tsv') return toTsv(t);
+  const stamped = stamp ? { ...t, notes: [...(t.notes || []), stamp] } : t;
+  return fmt === 'md' ? toMarkdown(stamped) : toText(stamped);
+}
+
+/**
+ * A JSON document for the clipboard: when, the computer it came from and that computer's address, then the
+ * data. (`from_address`, not `source`, which in the data is where pings are sent from.) The data cannot
+ * replace those three.
+ */
+function jsonDoc(from, fromAddress, nowMs, data) {
+  const head = { copied_at: new Date(nowMs).toISOString(), from, from_address: fromAddress };
+  return JSON.stringify(Object.assign({ ...head }, data, head), null, 2);
+}
+
+/** A table row for other programs: the API's fields, less the ones that only drive the screen. */
+function jsonRow(r) {
+  const { id, order, line, removable, spark, ...rest } = r;
+  return rest;
+}
+
+// ------------------------------------------------------- end copy formats
+
 // ----------------------------------------------------------------- store
 
-const store = { hosts: new Map(), seq: 0, running: false, runningSince: null, measureEndsAt: null, measureHosts: 0, active: 0, counts: { total: 0, up: 0, down: 0, pending: 0, muted: 0 }, offset: 0 };
+const store = { hosts: new Map(), seq: 0, running: false, runningSince: null, measureEndsAt: null, measureHosts: 0, active: 0, waiting: 0, counts: { total: 0, up: 0, down: 0, pending: 0, muted: 0 }, offset: 0 };
 const serverNow = () => Date.now() + store.offset;
 
 // `selected` is the host the detail panel shows; `sel` is every highlighted host.
@@ -171,12 +330,16 @@ const view = { filter: 'all', query: '', closed: new Set(), selected: null, sel:
 
 // --------------------------------------------------------------- columns
 
+// Latency bands of the Last cell, in microseconds: under 100 ms feels immediate (LAN, metro, the same
+// continent), 100 to 199 ms is noticeable (another continent), 200 ms and over is laggy for anything
+// interactive. app.css colours them; a failure shows in words instead.
+const LAT_SLOW_US = 100000, LAT_BAD_US = 200000;
+const latClass = (us) => (us == null ? '' : us >= LAT_BAD_US ? ' lat-bad' : us >= LAT_SLOW_US ? ' lat-slow' : ' lat-good');
+
 function lastCell(r) {
   if (r.last_status == null) return none;
   if (r.last_status !== 'ok') return esc(STATUS_SHORT[r.last_status] || r.last_status);
-  const ms = r.last_rtt_us / 1000;
-  const pct = Math.min(100, Math.max(3, ((Math.log10(Math.max(ms, 0.01)) + 1) / 4) * 100));
-  return `${fmtMs(r.last_rtt_us)}<span class="bar-fill" style="width:${pct.toFixed(1)}%"></span>`;
+  return fmtMs(r.last_rtt_us);
 }
 
 function sparkHtml(r) {
@@ -212,31 +375,43 @@ function lossCell(p) {
 
 const STATE_RANK = { down: 0, failing: 1, recovering: 2, pending: 3, up: 4, muted: 5 };
 
+/** A row's state as a word, for copies: "Up", or "Up, old result" when the result is stale. */
+const stateText = (r) => STATE_WORD[r.state] + (r.stale ? ', old result' : '');
+/** The Last cell as plain text: the time in ms, or the failure in words. */
+const lastText = (r) => (r.last_status == null ? '' : r.last_status !== 'ok' ? STATUS_LABEL[r.last_status] || r.last_status : fmtMs(r.last_rtt_us) ?? '');
+const msText = (us) => fmtMs(us) ?? '';
+// Copies give times of day, which still mean something after the paste; the table shows "14s ago".
+const clockText = (tMs) => (tMs ? fmtClock(tMs) : '');
+const clockSheet = (tMs) => (tMs ? fmtClock(tMs, true) : '');
+
+// Each column: `html` draws the cell; `text` is the cell as plain text for copies (no `text`: not copied);
+// `sheet` overrides `text` for TSV, where a full date and time is more use than a time of day.
+// `words` columns are set in the sans-serif face; the rest are data, in monospace.
 const COLS = [
-  { id: 'state', label: '', w: 32, cls: 'c-state', fixed: true, sort: (r) => STATE_RANK[r.state], html: (r) => `<span class="sq ${r.state}" title="${STATE_TITLE[r.state]}"></span>` },
-  { id: 'host', label: 'Host', w: 180, cls: 'c-host', fixed: true, sort: (r) => r.host.toLowerCase() + (r.probe.kind === 'tcp' ? ':' + String(r.probe.port).padStart(5, '0') : ''), html: hostCell, title: hostWithPort },
-  { id: 'ip', label: 'IP address', w: 138, cls: 'dim', sort: (r) => ipKey(r.ip), html: (r) => (r.ip && r.ip !== r.host ? esc(r.ip) : r.ip ? `<span class="none">${esc(r.ip)}</span>` : none) },
-  { id: 'description', label: 'Description', w: 150, flex: true, sort: (r) => r.description.toLowerCase() || null, html: (r) => esc(r.description), title: (r) => r.description },
-  { id: 'last', label: 'Last ms', w: 100, num: true, cls: 'c-last', sort: (r) => (r.last_status == null ? null : r.last_rtt_us ?? Infinity), html: lastCell, extra: (r) => (r.last_status && r.last_status !== 'ok' ? ' is-fail' : ''), title: (r) => (r.last_status && r.last_status !== 'ok' ? STATUS_LABEL[r.last_status] : r.last_at_ms ? 'at ' + fmtClock(r.last_at_ms) : '') },
+  { id: 'state', label: '', copyLabel: 'State', w: 32, cls: 'c-state', fixed: true, sort: (r) => STATE_RANK[r.state], html: (r) => `<span class="sq ${r.state}" title="${STATE_TITLE[r.state]}${r.stale ? '. ' + STALE_TITLE : ''}"></span>`, text: stateText },
+  { id: 'host', label: 'Host', w: 180, cls: 'c-host', fixed: true, sort: (r) => r.host.toLowerCase() + (r.probe.kind === 'tcp' ? ':' + String(r.probe.port).padStart(5, '0') : ''), html: hostCell, title: hostWithPort, text: hostWithPort },
+  { id: 'ip', label: 'IP address', w: 138, cls: 'dim', sort: (r) => ipKey(r.ip), html: (r) => (r.ip && r.ip !== r.host ? esc(r.ip) : r.ip ? `<span class="none">${esc(r.ip)}</span>` : none), title: (r) => r.ip ?? '', text: (r) => r.ip ?? '' },
+  { id: 'description', label: 'Description', w: 150, cls: 'words', flex: true, sort: (r) => r.description.toLowerCase() || null, html: (r) => esc(r.description), title: (r) => r.description, text: (r) => r.description },
+  { id: 'last', label: 'Last ms', w: 100, num: true, cls: 'c-last', sort: (r) => (r.last_status == null ? null : r.last_rtt_us ?? Infinity), html: lastCell, extra: (r) => (r.last_status && r.last_status !== 'ok' ? ' is-fail' : r.last_status ? latClass(r.last_rtt_us) : ''), title: (r) => (r.last_status && r.last_status !== 'ok' ? STATUS_LABEL[r.last_status] : r.last_at_ms ? 'at ' + fmtClock(r.last_at_ms) : ''), text: lastText },
   { id: 'trend', label: 'Trend', w: 200, sort: (r) => r.recent_loss_pct, html: sparkHtml },
-  { id: 'avg', label: 'Avg ms', w: 72, num: true, sort: (r) => r.avg_rtt_us, html: (r) => msCell(r.avg_rtt_us) },
-  { id: 'min', label: 'Min ms', w: 80, num: true, cls: 'dim', off: true, sort: (r) => r.min_rtt_us, html: (r) => msCell(r.min_rtt_us) },
-  { id: 'max', label: 'Max ms', w: 80, num: true, cls: 'dim', off: true, sort: (r) => r.max_rtt_us, html: (r) => msCell(r.max_rtt_us) },
-  { id: 'jitter', label: 'Jitter ms', w: 88, num: true, cls: 'dim', off: true, sort: (r) => r.jitter_us, html: (r) => msCell(r.jitter_us) },
-  { id: 'loss', label: 'Loss', w: 64, num: true, sort: (r) => (r.sent ? r.failed_pct : null), html: (r) => (r.sent ? lossCell(r.failed_pct) : none) },
-  { id: 'name', label: 'Name', w: 150, cls: 'dim', hint: 'Name found by reverse lookup', sort: (r) => r.hostname, html: (r) => esc(r.hostname ?? ''), title: (r) => r.hostname ?? '' },
-  { id: 'sent', label: 'Sent', w: 66, num: true, cls: 'dim', off: true, sort: (r) => r.sent, html: (r) => r.sent.toLocaleString('en-US') },
-  { id: 'streak', label: 'Fails', w: 60, num: true, hint: 'Failed pings in a row right now', sort: (r) => r.consec_failed, html: (r) => r.consec_failed || '<span class="none">0</span>' },
-  { id: 'worst', label: 'Worst', w: 68, num: true, cls: 'dim', off: true, hint: 'Longest run of failed pings', sort: (r) => r.max_consec_failed, html: (r) => r.max_consec_failed || '<span class="none">0</span>' },
-  { id: 'status', label: 'Status', w: 160, cls: 'dim', off: true, sort: (r) => r.last_status_label, html: (r) => esc(r.last_status_label ?? '') },
-  { id: 'ttl', label: 'TTL', w: 52, num: true, cls: 'dim', off: true, sort: (r) => r.last_ttl, html: (r) => r.last_ttl ?? none },
-  { id: 'check', label: 'Check', w: 88, cls: 'dim', sort: (r) => checkLabel(r.probe), html: (r) => checkLabel(r.probe) },
-  { id: 'every', label: 'Every', w: 62, num: true, cls: 'dim', off: true, sort: (r) => r.interval_secs, html: (r) => fmtEvery(r.interval_secs) },
-  { id: 'lastfail', label: 'Last failure', w: 100, cls: 'dim', live: true, sort: (r) => r.last_failed_at_ms, html: (r) => fmtAgo(r.last_failed_at_ms) ?? none, title: (r) => (r.last_failed_at_ms ? fmtClock(r.last_failed_at_ms, true) : '') },
-  { id: 'lastok', label: 'Last answer', w: 112, cls: 'dim', off: true, live: true, sort: (r) => r.last_ok_at_ms, html: (r) => fmtAgo(r.last_ok_at_ms) ?? none, title: (r) => (r.last_ok_at_ms ? fmtClock(r.last_ok_at_ms, true) : '') },
-  { id: 'tags', label: 'Tags', w: 130, off: true, sort: (r) => r.tags.join(' ') || null, html: (r) => r.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('') },
-  { id: 'mac', label: 'MAC address', w: 150, cls: 'dim', off: true, sort: (r) => r.mac, html: (r) => r.mac ?? none },
-  { id: 'reply', label: 'Reply from', w: 138, cls: 'dim', off: true, sort: (r) => ipKey(r.reply_ip), html: (r) => esc(r.reply_ip ?? '') },
+  { id: 'avg', label: 'Avg ms', w: 72, num: true, sort: (r) => r.avg_rtt_us, html: (r) => msCell(r.avg_rtt_us), text: (r) => msText(r.avg_rtt_us) },
+  { id: 'min', label: 'Min ms', w: 72, num: true, cls: 'dim', off: true, sort: (r) => r.min_rtt_us, html: (r) => msCell(r.min_rtt_us), text: (r) => msText(r.min_rtt_us) },
+  { id: 'max', label: 'Max ms', w: 72, num: true, cls: 'dim', off: true, sort: (r) => r.max_rtt_us, html: (r) => msCell(r.max_rtt_us), text: (r) => msText(r.max_rtt_us) },
+  { id: 'jitter', label: 'Jitter ms', w: 80, num: true, cls: 'dim', off: true, sort: (r) => r.jitter_us, html: (r) => msCell(r.jitter_us), text: (r) => msText(r.jitter_us) },
+  { id: 'loss', label: 'Loss', w: 64, num: true, sort: (r) => (r.sent ? r.failed_pct : null), html: (r) => (r.sent ? lossCell(r.failed_pct) : none), text: (r) => (r.sent ? fmtPct(r.failed_pct) : '') },
+  { id: 'name', label: 'Name', w: 150, cls: 'dim', hint: 'Name found by reverse lookup', sort: (r) => r.hostname, html: (r) => esc(r.hostname ?? ''), title: (r) => r.hostname ?? '', text: (r) => r.hostname ?? '' },
+  { id: 'sent', label: 'Sent', w: 66, num: true, cls: 'dim', off: true, sort: (r) => r.sent, html: (r) => r.sent.toLocaleString('en-US'), text: (r) => String(r.sent) },
+  { id: 'streak', label: 'Fails', w: 56, num: true, hint: 'Failed pings in a row right now', sort: (r) => r.consec_failed, html: (r) => (r.consec_failed ? `<span class="loss-hot">${r.consec_failed}</span>` : '<span class="none">0</span>'), text: (r) => String(r.consec_failed) },
+  { id: 'worst', label: 'Worst', w: 60, num: true, cls: 'dim', off: true, hint: 'Longest run of failed pings', sort: (r) => r.max_consec_failed, html: (r) => r.max_consec_failed || '<span class="none">0</span>', text: (r) => String(r.max_consec_failed) },
+  { id: 'status', label: 'Status', w: 150, cls: 'dim words', off: true, sort: (r) => r.last_status_label, html: (r) => esc(r.last_status_label ?? ''), text: (r) => r.last_status_label ?? '' },
+  { id: 'ttl', label: 'TTL', w: 52, num: true, cls: 'dim', off: true, sort: (r) => r.last_ttl, html: (r) => r.last_ttl ?? none, text: (r) => String(r.last_ttl ?? '') },
+  { id: 'check', label: 'Check', w: 96, cls: 'dim', sort: (r) => checkLabel(r.probe), html: (r) => checkLabel(r.probe), text: (r) => checkLabel(r.probe) },
+  { id: 'every', label: 'Every', w: 60, num: true, cls: 'dim', off: true, sort: (r) => r.interval_secs, html: (r) => fmtEvery(r.interval_secs), text: (r) => fmtEvery(r.interval_secs) },
+  { id: 'lastfail', label: 'Last failure', w: 96, cls: 'dim', live: true, sort: (r) => r.last_failed_at_ms, html: (r) => fmtAgo(r.last_failed_at_ms) ?? none, title: (r) => (r.last_failed_at_ms ? fmtClock(r.last_failed_at_ms, true) : ''), text: (r) => clockText(r.last_failed_at_ms), sheet: (r) => clockSheet(r.last_failed_at_ms) },
+  { id: 'lastok', label: 'Last answer', w: 104, cls: 'dim', off: true, live: true, sort: (r) => r.last_ok_at_ms, html: (r) => fmtAgo(r.last_ok_at_ms) ?? none, title: (r) => (r.last_ok_at_ms ? fmtClock(r.last_ok_at_ms, true) : ''), text: (r) => clockText(r.last_ok_at_ms), sheet: (r) => clockSheet(r.last_ok_at_ms) },
+  { id: 'tags', label: 'Tags', w: 130, off: true, sort: (r) => r.tags.join(' ') || null, html: (r) => r.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join(''), text: (r) => r.tags.join(' ') },
+  { id: 'mac', label: 'MAC address', w: 150, cls: 'dim', off: true, sort: (r) => r.mac, html: (r) => (r.mac ? esc(r.mac) : none), text: (r) => r.mac ?? '' },
+  { id: 'reply', label: 'Reply from', w: 138, cls: 'dim', off: true, sort: (r) => ipKey(r.reply_ip), html: (r) => esc(r.reply_ip ?? ''), title: (r) => r.reply_ip ?? '', text: (r) => r.reply_ip ?? '' },
 ];
 const COL = Object.fromEntries(COLS.map((c) => [c.id, c]));
 if (!Array.isArray(prefs.cols)) prefs.cols = COLS.filter((c) => !c.off).map((c) => c.id);
@@ -254,7 +429,8 @@ const colWidth = (c) => Math.round((prefs.widths && prefs.widths[c.id]) || c.w);
 function orderedCols() {
   if (!Array.isArray(prefs.order)) return COLS;
   const place = (c) => { const i = prefs.order.indexOf(c.id); return i < 0 ? 1000 + COLS.indexOf(c) : i; };
-  return [...COLS].sort((x, y) => (x.fixed ? -1 : y.fixed ? 1 : place(x) - place(y)));
+  // State and Host stay first, in that order; the rest follow the order chosen.
+  return [...COLS].sort((x, y) => (x.fixed || y.fixed ? (!!y.fixed - !!x.fixed) || COLS.indexOf(x) - COLS.indexOf(y) : place(x) - place(y)));
 }
 
 /** The chosen columns that fit the window, dropping the least important first. */
@@ -281,8 +457,8 @@ function applyColumnWidths() {
   const template = shown
     .map((c) => {
       const w = colWidth(c);
-      // In a narrow window the host column takes the slack and may shrink.
-      if (fitting) return c.id === 'host' ? 'minmax(90px, 1fr)' : c.id === 'trend' ? `minmax(60px, ${w}px)` : w + 'px';
+      // In a narrow window the host and trend columns share the slack, the host getting more.
+      if (fitting) return c.id === 'host' ? 'minmax(90px, 3fr)' : c.id === 'trend' ? 'minmax(60px, 2fr)' : w + 'px';
       if (c.id === lastId) return `minmax(${w}px, 1fr)`; // the last column takes what is left
       // The description may grow to a comfortable reading width unless it was sized by hand.
       if (c.flex && !(prefs.widths && prefs.widths[c.id])) return `minmax(${w}px, ${w + 230}px)`;
@@ -361,10 +537,11 @@ function buildView() {
       if (!g.rows.length && (view.query || view.filter !== 'all')) continue;
       const closed = view.closed.has(g.name);
       items.push({ type: 'group', key: 'g:' + g.name, group: g, closed });
-      if (!closed) for (const r of g.rows) items.push({ type: 'host', key: 'h:' + r.id, row: r });
+      // Stripes start again under each group heading.
+      if (!closed) g.rows.forEach((r, i) => items.push({ type: 'host', key: 'h:' + r.id, row: r, odd: i % 2 === 1 }));
     }
   } else {
-    for (const r of rows) items.push({ type: 'host', key: 'h:' + r.id, row: r });
+    rows.forEach((r, i) => items.push({ type: 'host', key: 'h:' + r.id, row: r, odd: i % 2 === 1 }));
   }
   view.items = items;
   view.hostOrder = items.filter((i) => i.type === 'host').map((i) => i.row.id);
@@ -380,7 +557,7 @@ function rowStamp(item, liveBucket) {
     return `${g.total}|${g.up}|${g.down}|${item.closed}`;
   }
   const r = item.row;
-  return `${r.sent}|${r.state}|${r.last_at_ms}|${r.mac}|${r.hostname}|${r.ip}|${r.description}|${r.interval_secs}|${view.sel.has(r.id)}|${colsVersion}|${liveBucket}`;
+  return `${r.sent}|${r.state}|${r.stale}|${r.last_at_ms}|${r.mac}|${r.hostname}|${r.ip}|${r.description}|${r.interval_secs}|${view.sel.has(r.id)}|${item.odd}|${colsVersion}|${liveBucket}`;
 }
 
 function hostRowHtml(r) {
@@ -395,7 +572,7 @@ function hostRowHtml(r) {
 function groupRowHtml(item) {
   const g = item.group;
   const down = g.down ? ` · <b class="dn">${g.down} down</b>` : '';
-  return `<span class="caret"></span><span class="gr-name">${esc(g.name || 'Ungrouped')}</span><span class="gr-count"><b>${g.total}</b> ${g.total === 1 ? 'host' : 'hosts'} · ${g.up} up${down}</span>`;
+  return `<span class="caret"></span><span class="gr-name" title="${esc(g.name || 'Ungrouped')}">${esc(g.name || 'Ungrouped')}</span><span class="gr-count"><b>${g.total}</b> ${g.total === 1 ? 'host' : 'hosts'} · ${g.up} up${down}</span>`;
 }
 
 function renderWindow() {
@@ -430,7 +607,7 @@ function renderWindow() {
         if (changed) entry.glow = { cls: bad ? 'went-down' : 'came-up', until: Date.now() + 4000 };
         // Rows are redrawn on every ping; keeping the class lets the glow run its full length.
         const glow = entry.glow && Date.now() < entry.glow.until ? ' ' + entry.glow.cls : '';
-        el.className = `tr is-${r.state}${r.enabled ? '' : ' is-off'}${view.sel.has(r.id) ? ' is-selected' : ''}${glow}`;
+        el.className = `tr is-${r.state}${item.odd ? ' is-odd' : ''}${r.enabled ? '' : ' is-off'}${r.stale ? ' is-stale' : ''}${view.sel.has(r.id) ? ' is-selected' : ''}${glow}`;
         el.setAttribute('role', 'row');
         el.innerHTML = hostRowHtml(r);
         if (changed) {
@@ -458,19 +635,26 @@ function renderWindow() {
 
 function renderBar() {
   const c = store.counts;
-  $('n-total').textContent = c.total;
-  $('n-up').textContent = c.up;
-  $('n-down').textContent = c.down;
-  $('n-muted').textContent = c.muted;
+  // Screen readers observe this live region. Announce only counts that actually changed.
+  for (const name of ['total', 'up', 'down', 'muted']) {
+    const count = $('n-' + name);
+    const value = String(c[name]);
+    if (count.textContent !== value) count.textContent = value;
+  }
   $('tally-muted').hidden = c.muted === 0 && view.filter !== 'muted';
   document.querySelector('.tally-down').classList.toggle('has-down', c.down > 0);
-  document.querySelectorAll('.tally').forEach((el) => el.classList.toggle('is-on', el.dataset.filter === view.filter));
+  // Only a filter that hides hosts is marked; "N hosts", showing them all, is the plain state.
+  document.querySelectorAll('.tally').forEach((el) => {
+    const on = el.dataset.filter === view.filter;
+    el.classList.toggle('is-on', on && view.filter !== 'all');
+    el.setAttribute('aria-pressed', String(on));
+  });
   const measuring = store.measureEndsAt != null;
   const runState = $('run-state');
   runState.classList.toggle('is-running', store.running);
   runState.classList.toggle('is-measuring', measuring);
   runState.title = measuring ? 'A measurement is running. Click to see it.' : store.running ? 'Time since pinging started' : '';
-  $('run-text').textContent = measuring ? 'MEASURING' : store.running ? 'PINGING' : 'STOPPED';
+  $('run-text').textContent = measuring ? 'Measuring' : store.running ? 'Pinging' : 'Stopped';
   let sub = '';
   if (measuring) {
     sub = `${fmtSpan(store.measureEndsAt - serverNow())} left · ${store.measureHosts} ${store.measureHosts === 1 ? 'host' : 'hosts'}`;
@@ -480,9 +664,11 @@ function renderBar() {
   $('run-sub').textContent = sub;
   const toggle = $('btn-toggle');
   const busy = store.running || measuring;
-  toggle.textContent = busy ? 'STOP' : 'START';
+  toggle.textContent = busy ? 'Stop' : 'Start';
   toggle.classList.toggle('is-stop', busy);
-  toggle.title = measuring ? 'Stop the measurement and all pinging (S)' : 'Start or stop the regular pinging (S)';
+  toggle.title = measuring
+    ? 'Stop the measurement and all pinging (S)'
+    : 'Start or stop the regular pinging (S)';
   toggle.disabled = c.total === 0;
   document.title = (c.down ? `(${c.down}) ` : '') + 'pingtable';
 }
@@ -510,7 +696,11 @@ function renderFoot() {
     const rate = !store.running ? '' : perSecond >= 10 ? ` · about ${Math.round(perSecond)} pings a second` : perSecond >= 1 ? ` · about ${perSecond.toFixed(1)} pings a second` : '';
     $('foot-rate').innerHTML = `<i>Every</i><b>${fmtEvery(settings.interval_secs)}</b><i>Timeout</i><b>${settings.timeout_ms} ms</b><span>${rate}</span>`;
   }
-  $('foot-flight').innerHTML = `<b>${store.active}</b> in flight`;
+  const flight = $('foot-flight');
+  flight.innerHTML = `<b>${store.active}</b> in flight` + (store.waiting ? ` · <b class="warn">${store.waiting}</b> waiting` : '');
+  flight.title = store.waiting
+    ? `${store.waiting} ${store.waiting === 1 ? 'host is' : 'hosts are'} due and waiting for a free slot. The table asks for more pings at once than Settings allows: raise "Pings in flight at once", lengthen the interval, or shorten the timeout.`
+    : 'Pings sent and not yet answered or timed out';
   $('foot-sel').hidden = view.sel.size < 2;
   $('foot-sel').innerHTML = `<b>${view.sel.size}</b> selected`;
   const filtered = view.filter !== 'all' || view.query;
@@ -550,14 +740,28 @@ function applySnapshot(snap) {
   store.measureEndsAt = snap.measure_ends_at_ms;
   store.measureHosts = snap.measure_hosts;
   store.active = snap.active;
+  store.waiting = snap.waiting || 0;
   store.counts = snap.counts;
   store.offset = snap.now_ms - Date.now();
   if (view.selected != null && !store.hosts.has(view.selected)) { view.selected = null; closeDetail(); }
   for (const id of view.sel) if (!store.hosts.has(id)) view.sel.delete(id);
   for (const event of snap.events) announce(event);
+  for (const note of snap.notes || []) {
+    if (note.sticky) showStickyNote(note.text); else toast('down', 'Note', note.text);
+  }
   if (view.selected != null && snap.hosts.some((h) => h.id === view.selected)) refreshDetail();
   loadedOnce = true;
   schedule();
+}
+
+/** A note that must not slip by, such as a settings file that could not be read. It stays until dismissed. */
+function showStickyNote(text) {
+  const list = $('note-list');
+  if ([...list.children].some((li) => li.textContent === text)) return;
+  const li = document.createElement('li');
+  li.textContent = text;
+  list.appendChild(li);
+  $('note-banner').hidden = false;
 }
 
 async function poll() {
@@ -567,6 +771,7 @@ async function poll() {
       const snap = await api(`state?since=${store.seq}${wait}`);
       if (failures) { $('banner').hidden = true; failures = 0; }
       applySnapshot(snap);
+      if (!appInfo) loadInfo().catch(() => {});
     } catch (err) {
       if (err.message === 'unauthorized') return;
       failures++;
@@ -615,8 +820,8 @@ function toast(kind, strong, text) {
 }
 
 function announce(event) {
-  if (event.kind === 'down') toast('down', 'DOWN', `${event.host} · ${STATUS_LABEL[event.status] || event.status}`);
-  else toast('up', 'UP', `${event.host} is answering again`);
+  if (event.kind === 'down') toast('down', 'Down', `${event.host} · ${STATUS_LABEL[event.status] || event.status}`);
+  else toast('up', 'Up', `${event.host} is answering again`);
   beep(event.kind);
 }
 
@@ -628,13 +833,14 @@ let detailBusy = false;
 let chartDirty = true;
 let hoverIndex = -1;
 
-function select(id, open = false) {
+/** Select one host. `scroll: false` leaves the table where it is (a right-click on a row cut off at an edge). */
+function select(id, open = false, { scroll = true } = {}) {
   if (id === view.selected && view.sel.size === 1 && !open) return;
   view.selected = id;
   view.sel = new Set([id]);
   schedule(false);
   if (open || !$('detail').hidden) openDetail();
-  scrollToSelected();
+  if (scroll) scrollToSelected();
 }
 
 function scrollToSelected() {
@@ -678,9 +884,30 @@ async function refreshDetail() {
   } catch {} finally { detailBusy = false; }
 }
 
-function tile(label, value, unit = '', bad = false, words = false) {
+// The detail panel's figures as [label, value, unit], kept as they are drawn, for copies.
+let detailFigures = [];
+
+function tile(label, value, unit = '', bad = false, words = false, title = '') {
   const empty = value === '–';
-  return `<div class="tile"><div class="tile-l">${label}</div><div class="tile-v${bad ? ' bad' : ''}${empty ? ' none' : ''}${words ? ' is-words' : ''}">${value}${unit && !empty ? `<small>${unit}</small>` : ''}</div></div>`;
+  detailFigures.push([label, empty ? '' : String(value), empty ? '' : unit]);
+  return `<div class="tile"${title ? ` title="${esc(title)}"` : ''}><div class="tile-l">${label}</div><div class="tile-v${bad ? ' bad' : ''}${empty ? ' none' : ''}${words ? ' is-words' : ''}">${value}${unit && !empty ? `<small>${unit}</small>` : ''}</div></div>`;
+}
+
+const WINDOW_MS = { '5m': 300000, '1h': 3600000 };
+const WINDOW_NAME = { '5m': '5 min', '1h': '1 hour' };
+
+/** A span as a tile label: 45 s, 33 min, 2 h. */
+function fmtSpanShort(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 90) return s + ' s';
+  if (s < 5400) return Math.round(s / 60) + ' min';
+  return Math.round(s / 360) / 10 + ' h';
+}
+
+/** "Loss, 1 hour" once the kept history reaches that far back; until then, the span it really covers. */
+function lossLabel(win, name) {
+  if (!win || !win.sent || win.covered_ms >= WINDOW_MS[name] * 0.98) return 'Loss, ' + WINDOW_NAME[name];
+  return 'Loss, ' + fmtSpanShort(win.covered_ms);
 }
 
 function renderDetail() {
@@ -690,7 +917,8 @@ function renderDetail() {
   $('d-title').textContent = r.host;
   const stateEl = $('d-state');
   stateEl.className = 'd-state ' + r.state;
-  stateEl.textContent = r.state.toUpperCase();
+  stateEl.textContent = STATE_WORD[r.state] + (r.stale ? ', old result' : '');
+  stateEl.title = r.stale ? STALE_TITLE : '';
   const meta = [];
   if (r.description) meta.push(esc(r.description));
   if (r.ip && r.ip !== r.host) meta.push(`<b>${esc(r.ip)}</b>`);
@@ -700,23 +928,35 @@ function renderDetail() {
   if (r.mac) meta.push(r.mac);
   if (r.tags.length) meta.push(r.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join(''));
   $('d-meta').innerHTML = meta.join(' · ');
-  $('d-toggle').textContent = r.enabled ? 'MUTE' : 'UNMUTE';
+  $('d-toggle').textContent = r.enabled ? 'Mute' : 'Unmute';
 
   const dash = '–';
   const w = Object.fromEntries(detail.windows.map((x) => [x.label, x]));
   const win = (label) => (w[label] && w[label].sent ? fmtPct(w[label].loss_pct) : dash);
   const lastBad = r.last_status && r.last_status !== 'ok';
+  // Some figures are since the counters were reset; others can only reach as far back as the samples kept.
+  const kept = detail.history.length.toLocaleString('en-US');
+  const sinceReset = 'Since the counters were last reset.';
+  const recent = `Over the ${kept} most recent pings kept. Average, fastest and slowest are since the counters were last reset.`;
+  const short = (name) => (w[name] && w[name].sent && w[name].covered_ms < WINDOW_MS[name] * 0.98
+    ? `The ${kept} pings kept reach back ${fmtSpanShort(w[name].covered_ms)}, not ${WINDOW_NAME[name]}. Keep more samples per host in Settings to see further.`
+    : `Over the last ${WINDOW_NAME[name]}.`);
+  const missed = r.missed ? ` ${r.missed.toLocaleString('en-US')} beats passed while a failed ping was still waiting for its timeout; they count as lost.` : '';
+  detailFigures = [];
   $('d-tiles').innerHTML =
     tile('Last', lastBad ? esc(STATUS_SHORT[r.last_status] || r.last_status) : fmtMs(r.last_rtt_us) ?? dash, lastBad ? '' : 'ms', lastBad, lastBad) +
-    tile('Average', fmtMs(r.avg_rtt_us) ?? dash, 'ms') +
-    tile('Median', fmtMs(detail.p50_rtt_us) ?? dash, 'ms') +
-    tile('95th pct', fmtMs(detail.p95_rtt_us) ?? dash, 'ms') +
-    tile('Fastest', fmtMs(r.min_rtt_us) ?? dash, 'ms') +
-    tile('Slowest', fmtMs(r.max_rtt_us) ?? dash, 'ms') +
+    tile('Average', fmtMs(r.avg_rtt_us) ?? dash, 'ms', false, false, sinceReset) +
+    tile('Median, recent', fmtMs(detail.p50_rtt_us) ?? dash, 'ms', false, false, recent) +
+    tile('95th, recent', fmtMs(detail.p95_rtt_us) ?? dash, 'ms', false, false, recent) +
+    tile('Fastest', fmtMs(r.min_rtt_us) ?? dash, 'ms', false, false, sinceReset) +
+    tile('Slowest', fmtMs(r.max_rtt_us) ?? dash, 'ms', false, false, sinceReset) +
     tile('Jitter', fmtMs(r.jitter_us) ?? dash, 'ms') +
-    tile('Loss, all', r.sent ? fmtPct(r.failed_pct) : dash, '', r.failed_pct >= 20) +
-    tile('Loss, 5 min', win('5m'), '', w['5m'] && w['5m'].loss_pct >= 20) +
-    tile('Loss, 1 hour', win('1h'), '', w['1h'] && w['1h'].loss_pct >= 20) +
+    tile('Loss, all', r.sent ? fmtPct(r.failed_pct) : dash, '', r.failed_pct >= 20, false, sinceReset + missed) +
+    tile(lossLabel(w['5m'], '5m'), win('5m'), '', w['5m'] && w['5m'].loss_pct >= 20, false, short('5m')) +
+    // Until the kept pings reach past the 5-minute tile, the hour would only repeat it under the same label.
+    (w['1h'] && w['5m'] && w['1h'].sent && w['1h'].covered_ms <= w['5m'].covered_ms + 1000
+      ? tile('Loss, 1 hour', dash, '', false, false, `The pings kept so far cover ${fmtSpanShort(w['1h'].covered_ms)}, the same as the tile before.`)
+      : tile(lossLabel(w['1h'], '1h'), win('1h'), '', w['1h'] && w['1h'].loss_pct >= 20, false, short('1h'))) +
     tile('Sent', r.sent.toLocaleString('en-US')) +
     tile('Worst run', r.max_consec_failed, r.max_consec_failed === 1 ? 'fail' : 'fails');
 
@@ -856,6 +1096,89 @@ function chartHover(event) {
   drawChart();
 }
 
+// ------------------------------------------------ copying from the panels
+
+/** A host's name with its description, as a title over a copy. */
+const hostTitle = (r) => hostWithPort(r) + (r.description ? ` (${oneLine(r.description)})` : '');
+/** A time of day with milliseconds, for samples that can come several a second. */
+const fmtClockMs = (tMs, withDate) => fmtClock(tMs, withDate) + '.' + String(Math.floor(tMs) % 1000).padStart(3, '0');
+
+/** The figures in the detail panel's tiles. */
+const figuresTable = () => ({
+  title: hostTitle(detail.row),
+  cols: [{ label: 'Figure' }, { label: 'Value', num: true }],
+  rows: detailFigures.map(([label, value, unit]) => [label, value + (value && unit ? ' ' + unit : '')]),
+});
+
+/** The timeline: each run of good or failed pings, newest first, as the panel lists them. */
+function runsTable(fmt) {
+  const clock = (t) => fmtClock(t, fmt === 'tsv');
+  return {
+    title: 'Timeline of ' + hostTitle(detail.row),
+    cols: [{ label: 'Result' }, { label: 'From' }, { label: 'To' }, { label: 'Lasted', num: true }, { label: 'Pings', num: true }],
+    rows: [...detail.runs].reverse().map((run, i) => {
+      const end = i === 0 ? Math.max(run.end_ms, serverNow()) : run.end_ms;
+      return [STATUS_LABEL[run.status] || run.status, clock(run.start_ms), i === 0 ? 'now' : clock(run.end_ms), fmtDur(end - run.start_ms) + (i === 0 ? ' so far' : ''), String(run.count)];
+    }),
+  };
+}
+
+/** Every sample kept for the host, oldest first: what the chart draws. */
+function samplesTable(fmt) {
+  return {
+    title: 'Samples of ' + hostTitle(detail.row),
+    cols: [{ label: 'Time' }, { label: 'ms', num: true }, { label: 'Result' }, { label: 'TTL', num: true }],
+    rows: detail.history.map((x) => [fmtClockMs(x.t_ms, fmt === 'tsv'), msText(x.rtt_us), STATUS_LABEL[x.status] || x.status, String(x.ttl ?? '')]),
+  };
+}
+
+/** Copy one of the panels' tables; `json` gives the data for the JSON format. */
+function copyResult(fmt, table, json, what) {
+  copyText(fmt === 'json' ? jsonCopy(json()) : renderTable(table(fmt), fmt, stampLine()), `${what} as ${FORMAT_NAME[fmt]}`);
+}
+
+function detailMenu() {
+  if (!detail) return null;
+  const r = detail.row;
+  const name = hostWithPort(r);
+  const n = detail.history.length;
+  return {
+    title: name,
+    items: [
+      selectionItem($('detail')),
+      { label: 'Copy summary', run: () => copyText(summaryText(store.hosts.get(r.id) || r), 'Summary of ' + name) },
+      { label: 'Copy figures as', copy: (fmt) => copyResult(fmt, figuresTable, () => ({ host: jsonRow(detail.row), p50_rtt_us: detail.p50_rtt_us, p95_rtt_us: detail.p95_rtt_us, p99_rtt_us: detail.p99_rtt_us, windows: detail.windows }), 'Figures for ' + name) },
+      { label: 'Copy timeline as', disabled: !detail.runs.length, copy: (fmt) => copyResult(fmt, runsTable, () => ({ host: jsonRow(detail.row), runs: detail.runs }), 'Timeline of ' + name) },
+      { label: `Copy ${plural(n, 'sample')} as`, title: 'Every ping kept for this host, oldest first', disabled: !n, copy: (fmt) => copyResult(fmt, samplesTable, () => ({ host: jsonRow(detail.row), samples: detail.history }), `${plural(n, 'sample')} of ${name}`) },
+    ],
+  };
+}
+
+/** A menu of the four formats, for a result window. */
+function resultMenu(title, area, table, json, what) {
+  return {
+    title,
+    items: [
+      selectionItem(area),
+      ...FORMATS.map(([f, name]) => ({ label: 'Copy as ' + (f === 'text' ? 'text' : name), title: FORMAT_TITLE[f], run: () => copyResult(f, table, json, what) })),
+    ],
+  };
+}
+
+/** The copy menu for a part of the page marked data-copy. */
+function copyMenuFor(kind) {
+  if (kind === 'detail') return detailMenu();
+  if (kind === 'measure' && measureLast) {
+    const m = measureLast;
+    return resultMenu('Measurement', $('dlg-measure'), () => measureTable(m), () => ({ measurement: m }), `Measurement of ${plural(m.hosts.length, 'host')}`);
+  }
+  if (kind === 'trace' && traceLast) {
+    const out = traceLast;
+    return resultMenu('Route to ' + out.host, $('dlg-trace'), () => traceTable(out), () => ({ trace: out }), 'Route to ' + out.host);
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- dialog
 
 // Fields of the Settings window, and the three that belong to the host list.
@@ -891,11 +1214,18 @@ function readFields(fields, into) {
   return into;
 }
 
+// The revision of the host list the editor was loaded from (`hosts_rev` from GET /config; null from a
+// pingtable too old to have one). Sent back with the edited list, so a host added meanwhile (in another
+// tab, or by an agent) makes the server refuse instead of being dropped.
+let hostsRev = null;
+
 /** The whole host list as text, for bulk edits. `appended` is added at the end (an import). */
 async function openHosts(appended) {
   setMsg('');
+  $('dlg-reload').hidden = true;
   try {
     loaded = await api('config');
+    hostsRev = loaded.hosts_rev ?? null;
     fillFields(listFields, loaded.settings);
     $('f-hosts').value = loaded.hosts_text;
   } catch (err) { setMsg(err.message, true); }
@@ -931,6 +1261,13 @@ async function openSettings(tab = 'pinging') {
     }
     fillFields(settingFields, loaded.settings);
     $('f-autostart').checked = loaded.autostart;
+    // commands_locked in the settings file: the server keeps the commands whatever is sent.
+    const locked = !!loaded.commands_locked;
+    $('dlg-settings').classList.toggle('commands-locked', locked);
+    for (const id of ['f-cmddown', 'f-cmdup']) {
+      $(id).disabled = locked;
+      $(id).title = locked ? 'Locked in the settings file: set commands_locked to false there to change it here' : '';
+    }
     $('cfg-path').textContent = 'Settings are saved in ' + loaded.config_path;
   } catch (err) { $('settings-msg').textContent = err.message; }
   showTab(tab);
@@ -946,10 +1283,12 @@ async function applySettings() {
   if (!$('settings-form').reportValidity()) return;
   $('settings-msg').textContent = 'Applying…';
   try {
-    const out = await api('config', {
-      method: 'PUT',
-      body: { settings: readFields(settingFields, { ...loaded.settings }), hosts_text: loaded.hosts_text, keep_stats: true, autostart: $('f-autostart').checked },
-    });
+    // Only this window's own settings go back: what is left out (the host list, and the three settings the
+    // host list window owns) stays as the server has it, so two windows open at once cannot undo each other.
+    const settings = readFields(settingFields, {});
+    if (loaded.commands_locked) { delete settings.on_down_command; delete settings.on_up_command; }
+    const out = await api('config', { method: 'PUT', body: { settings, autostart: $('f-autostart').checked } });
+    if (out.hosts_rev != null) loaded.hosts_rev = out.hosts_rev;
     if (out.save_error) { $('settings-msg').textContent = 'Applied, but the settings file could not be written: ' + out.save_error; return; }
     $('dlg-settings').close();
     await loadSource();
@@ -987,15 +1326,65 @@ function preview() {
 async function applyHosts(keepStats) {
   setMsg('Applying…');
   try {
-    const out = await api('config', {
-      method: 'PUT',
-      body: { settings: readFields(listFields, { ...loaded.settings }), hosts_text: $('f-hosts').value, keep_stats: keepStats, autostart: loaded.autostart },
-    });
+    // The host list and the three settings that belong to it; the rest stays as the server has it.
+    const body = { settings: readFields(listFields, {}), hosts_text: $('f-hosts').value, keep_stats: keepStats };
+    if (hostsRev != null) body.hosts_rev = hostsRev;
+    const out = await api('config', { method: 'PUT', body });
+    if (out.hosts_rev != null) { hostsRev = out.hosts_rev; loaded.hosts_rev = out.hosts_rev; }
+    $('dlg-reload').hidden = true;
     if (out.save_error) { setMsg('Applied, but the settings file could not be written: ' + out.save_error, true); return; }
     $('dlg-hosts').close();
     refreshConfig();
-    if (out.hosts > 0 && !store.running && loaded.autostart) await api('control', { method: 'POST', body: { action: 'start' } });
-    if (out.warnings.length) toast('up', 'NOTE', `${out.warnings.length} ${out.warnings.length === 1 ? 'entry was' : 'entries were'} skipped`);
+    if (out.hosts > 0 && !store.running && loaded.autostart) await control('start');
+    if (out.warnings.length) toast('up', 'Note', `${out.warnings.length} ${out.warnings.length === 1 ? 'entry was' : 'entries were'} skipped`);
+  } catch (err) {
+    setMsg(err.message, true);
+    // 409: the list changed on the server since this window loaded it. Nothing was applied, and the
+    // text stays as typed; "Load it again" fetches the list as it is now.
+    if (err.status === 409) { $('dlg-reload').hidden = false; $('dlg-reload').focus(); }
+  }
+}
+
+/**
+ * After a 409: put the list as the server has it now in the editor. What was typed is copied to the
+ * clipboard first, and the editor's undo (Ctrl+Z) brings it back too, so nothing typed is lost.
+ */
+async function reloadHosts() {
+  const box = $('f-hosts');
+  const mine = box.value;
+  // Copy before waiting on the server, while the click still counts as the user's own.
+  const copied = copyText(mine, 'what you typed in the host list');
+  try {
+    const now = await api('config');
+    const onClipboard = await copied;
+    if (!$('dlg-hosts').open) return;
+    if (box.value !== mine) {
+      setMsg('You edited the list while it was loading. Your edits are still here. Choose “Load it again” when you are ready.', true);
+      return;
+    }
+    box.focus();
+    box.select();
+    // insertText keeps the change on the undo stack.
+    let undoable = false;
+    try { undoable = document.execCommand('insertText', false, now.hosts_text); } catch {}
+    if (!undoable) {
+      if (!onClipboard) {
+        setMsg('Your edits are selected. Copy them, then close and reopen the host list to load the current version.', true);
+        return;
+      }
+      box.value = now.hosts_text;
+    }
+    loaded = now;
+    hostsRev = now.hosts_rev ?? null;
+    fillFields(listFields, now.settings);
+    box.setSelectionRange(0, 0);
+    box.scrollTop = 0;
+    $('dlg-reload').hidden = true;
+    preview();
+    setMsg('Loaded the current host list. ' + [
+      onClipboard && 'Your edits are on the clipboard.',
+      undoable && 'Ctrl+Z restores your edits.',
+    ].filter(Boolean).join(' '));
   } catch (err) { setMsg(err.message, true); }
 }
 
@@ -1005,11 +1394,11 @@ async function importFile(file) {
   try {
     const text = await file.text();
     const out = await api('import', { method: 'POST', body: { text } });
-    if (!out.hosts) { toast('down', 'IMPORT', `No hosts found in ${file.name}`); return; }
+    if (!out.hosts) { toast('down', 'Import', `No hosts found in ${file.name}`); return; }
     const note = `${out.hosts} ${out.hosts === 1 ? 'host' : 'hosts'} from ${file.name} (${out.format})` +
       (out.skipped.length ? `, ${out.skipped.length} rows skipped` : '') + '. Apply to use them, or Ctrl+Z to undo.';
     openHosts({ text: out.text, note });
-  } catch (err) { toast('down', 'ERROR', err.message); }
+  } catch (err) { toast('down', 'Error', err.message); }
 }
 
 /** Ask for a CSV or text file of hosts. Dropping one on the window does the same. */
@@ -1025,17 +1414,24 @@ function likelyGroup() {
   return r ? r.group || '' : null;
 }
 
-/** Open the small Add window. `group` preselects where the hosts go; `text` prefills them. */
+/**
+ * The "A new group" choice in the Add window. No group name can hold a NUL, so it never clashes with one.
+ * Its option is made with the DOM, not HTML: the HTML parser would turn the NUL into U+FFFD.
+ */
+const NEW_GROUP = '\u0000new';
+
+/** Open the small Add window. `group` preselects where the hosts go (NEW_GROUP: a new one); `text` prefills them. */
 function openAdd(group, text) {
   const groups = [...new Set([...store.hosts.values()].sort((a, b) => a.order - b.order).map((r) => r.group).filter(Boolean))];
   const wanted = group === undefined ? likelyGroup() : group;
-  $('add-group').innerHTML =
+  const pick = $('add-group');
+  pick.innerHTML =
     '<option value="">No group</option>' +
-    groups.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join('') +
-    '<option value="\u0000new">A new group…</option>';
-  $('add-group').value = wanted === '\u0000new' ? '\u0000new' : groups.includes(wanted) ? wanted : '';
+    groups.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
+  pick.append(new Option('A new group\u2026', NEW_GROUP));
+  pick.value = wanted === NEW_GROUP ? NEW_GROUP : groups.includes(wanted) ? wanted : '';
   $('add-new').value = '';
-  $('add-new-wrap').hidden = $('add-group').value !== '\u0000new';
+  $('add-new-wrap').hidden = pick.value !== NEW_GROUP;
   $('add-text').value = text || '';
   $('add-msg').textContent = '';
   $('add-msg').classList.remove('bad');
@@ -1045,21 +1441,21 @@ function openAdd(group, text) {
     $('add-ports').value = '';
     $('dlg-add').showModal();
   }
-  ($('add-group').value === '\u0000new' && !text ? $('add-new') : $('add-text')).focus();
+  (pick.value === NEW_GROUP && !text ? $('add-new') : $('add-text')).focus();
 }
 
 async function addHosts() {
   const entries = $('add-text').value.split('\n').map((line) => line.trim()).filter(Boolean);
   const choice = $('add-group').value;
-  const group = choice === '\u0000new' ? $('add-new').value.trim() : choice;
+  const group = choice === NEW_GROUP ? $('add-new').value.trim() : choice;
   const msg = $('add-msg');
   msg.classList.add('bad');
   if (!entries.length) { msg.textContent = 'Type a host name or an address.'; $('add-text').focus(); return; }
-  if (choice === '\u0000new' && !group) { msg.textContent = 'Give the new group a name.'; $('add-new').focus(); return; }
+  if (choice === NEW_GROUP && !group) { msg.textContent = 'Give the new group a name.'; $('add-new').focus(); return; }
   const ping = chipPing($('add-chips'));
   const ports = chipPorts($('add-chips'));
   const portsText = $('add-ports').value.trim();
-  if (!ping && !ports.length && !portsText) { msg.textContent = 'Choose PING or at least one port.'; return; }
+  if (!ping && !ports.length && !portsText) { msg.textContent = 'Choose Ping or at least one port.'; return; }
   try {
     const out = await api('hosts/add', { method: 'POST', body: { entries, group: group || null, ports, ports_text: portsText, ping } });
     const noun = ports.length || portsText ? ['row', 'rows'] : ['host', 'hosts'];
@@ -1080,14 +1476,14 @@ async function addHosts() {
 async function removeHosts(rows) {
   const removable = rows.filter((r) => r.removable);
   if (!removable.length) {
-    toast('up', 'NOTE', rows.length === 1 ? `${rows[0].host} shares its line with other hosts. Edit the host list to remove it.` : 'These hosts share their lines with others. Edit the host list to remove them.');
+    toast('up', 'Note', rows.length === 1 ? `${rows[0].host} shares its line with other hosts. Edit the host list to remove it.` : 'These hosts share their lines with others. Edit the host list to remove them.');
     return;
   }
   const what = removable.length === 1 ? removable[0].host : `${removable.length} hosts`;
-  if (!(await confirmBox('REMOVE FROM THE LIST', `${what} will be taken out of the host list, with its history.` + (removable.length < rows.length ? ` ${rows.length - removable.length} of the selected hosts share a line with others and stay.` : ''), 'REMOVE'))) return;
+  if (!(await confirmBox('Remove from the list', `${what} will be taken out of the host list, with its history.` + (removable.length < rows.length ? ` ${rows.length - removable.length} of the selected hosts share a line with others and stay.` : ''), 'Remove'))) return;
   try {
     await api('hosts', { method: 'POST', body: { action: 'remove', ids: removable.map((r) => r.id) } });
-  } catch (err) { toast('down', 'ERROR', err.message); }
+  } catch (err) { toast('down', 'Error', err.message); }
 }
 
 function confirmBox(title, text, yes) {
@@ -1104,50 +1500,65 @@ function confirmBox(title, text, yes) {
 
 // --------------------------------------------------------------- actions
 
-const control = (action) => api('control', { method: 'POST', body: { action } }).catch((err) => toast('down', 'ERROR', err.message));
+const control = (action) => api('control', { method: 'POST', body: { action } }).catch((err) => {
+  toast('down', 'Error', err.message);
+});
 
 async function toggleEnabled(id) {
   const r = store.hosts.get(id);
   if (!r) return;
-  try { await api('hosts/' + id, { method: 'POST', body: { enabled: !r.enabled } }); refreshDetail(); } catch (err) { toast('down', 'ERROR', err.message); }
+  try { await api('hosts/' + id, { method: 'POST', body: { enabled: !r.enabled } }); refreshDetail(); } catch (err) { toast('down', 'Error', err.message); }
 }
 
 async function download(format) {
   try {
     const res = await api('export?format=' + format, { raw: true });
-    const blob = await res.blob();
+    // Excel reads a CSV file as UTF-8 only when it starts with a byte-order mark. (text() drops one the server sent.)
+    const blob = format === 'csv' ? new Blob(['\ufeff' + (await res.text())], { type: 'text/csv;charset=utf-8' }) : await res.blob();
     const a = document.createElement('a');
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     a.href = URL.createObjectURL(blob);
     a.download = `pingtable-${stamp}.${format}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  } catch (err) { toast('down', 'ERROR', err.message); }
+  } catch (err) { toast('down', 'Error', err.message); }
 }
 
 /** One action on several hosts: mute, unmute, solo, unmute_all, ping_now or reset. */
 async function bulk(action, ids) {
-  try { await api('hosts', { method: 'POST', body: { action, ids } }); refreshDetail(); } catch (err) { toast('down', 'ERROR', err.message); }
+  try { await api('hosts', { method: 'POST', body: { action, ids } }); refreshDetail(); } catch (err) {
+    toast('down', 'Error', err.message);
+  }
 }
 
 async function hostAction(id, body) {
-  try { await api('hosts/' + id, { method: 'POST', body }); refreshDetail(); } catch (err) { toast('down', 'ERROR', err.message); }
+  try { await api('hosts/' + id, { method: 'POST', body }); refreshDetail(); } catch (err) { toast('down', 'Error', err.message); }
 }
 
+/** Put text on the clipboard and say so. True when it worked; when it did not, a toast says what to do. */
 async function copyText(text, what) {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
-    // Older or locked-down browsers: fall back to a hidden text box.
+    // Older or locked-down browsers: fall back to a hidden text box (inside an open window, which
+    // leaves the rest of the page inert). execCommand says whether it copied, or throws.
+    const back = document.activeElement;
     const box = document.createElement('textarea');
     box.value = text;
     box.style.cssText = 'position:fixed;opacity:0';
-    document.body.appendChild(box);
+    ([...document.querySelectorAll('dialog[open]')].pop() || document.body).appendChild(box);
     box.select();
-    document.execCommand('copy');
+    let copied = false;
+    try { copied = document.execCommand('copy'); } catch {}
     box.remove();
+    if (back && back.focus) back.focus();
+    if (!copied) {
+      toast('down', 'Could not copy', 'select the text and press Ctrl+C');
+      return false;
+    }
   }
-  toast('up', 'COPIED', what);
+  toast('up', 'Copied', what);
+  return true;
 }
 
 // This computer: its name, its addresses and the one it sends from by default.
@@ -1168,12 +1579,14 @@ function summaryText(r) {
   const ms = (us) => fmtMs(us) ?? '–';
   const ip = r.ip && r.ip !== r.host ? ` (${r.ip})` : '';
   const why = r.last_status && r.last_status !== 'ok' ? `, ${STATUS_LABEL[r.last_status].toLowerCase()}` : '';
-  const lines = [`${r.host}${ip}: ${r.state.toUpperCase()}${why}`];
+  const lines = [`${hostWithPort(r)}${ip}: ${STATE_WORD[r.state]}${why}`];
   lines.push([r.description, checkLabel(r.probe), 'every ' + fmtEvery(r.interval_secs), r.group && 'group ' + r.group, r.tags.length && 'tags ' + r.tags.join(', ')].filter(Boolean).join(' · '));
   if (r.ok) {
     lines.push(`Round trip: last ${ms(r.last_rtt_us)} ms, average ${ms(r.avg_rtt_us)} ms, fastest ${ms(r.min_rtt_us)} ms, slowest ${ms(r.max_rtt_us)} ms` + (r.jitter_us != null ? `, jitter ${ms(r.jitter_us)} ms` : ''));
   }
-  lines.push(r.sent ? `Loss: ${fmtPct(r.failed_pct)} (${r.failed.toLocaleString('en-US')} of ${r.sent.toLocaleString('en-US')} pings failed)` : 'No pings sent yet');
+  const unanswered = r.missed ? `; ${r.missed.toLocaleString('en-US')} more beats passed while those waited for their timeout` : '';
+  lines.push(r.sent ? `Loss: ${fmtPct(r.failed_pct)} (${r.failed.toLocaleString('en-US')} of ${r.sent.toLocaleString('en-US')} pings failed${unanswered})` : 'No pings sent yet');
+  if (r.stale) lines.push('Old result: this host is due and still waiting for a free slot.');
   if (r.consec_failed) {
     lines.push(`Failing for ${r.consec_failed} ${r.consec_failed === 1 ? 'ping' : 'pings in a row'}; last answer ${r.last_ok_at_ms ? fmtClock(r.last_ok_at_ms, true) : 'never'}`);
   } else if (r.last_failed_at_ms) {
@@ -1188,14 +1601,93 @@ function summaryText(r) {
 
 function groupSummaryText(g) {
   const rows = [...store.hosts.values()].filter((r) => (r.group || '') === g.name).sort((a, b) => a.order - b.order);
-  const width = Math.max(...rows.map((r) => r.host.length), 4);
+  const width = Math.max(...rows.map((r) => textWidth(hostWithPort(r))), 4);
   const lines = [`${g.name || 'Ungrouped'}: ${g.total} ${g.total === 1 ? 'host' : 'hosts'}, ${g.up} up, ${g.down} down`];
   for (const r of rows) {
     const result = r.last_status == null ? 'no result yet' : r.last_status === 'ok' ? fmtMs(r.last_rtt_us) + ' ms' : STATUS_LABEL[r.last_status].toLowerCase();
-    lines.push(`${r.state.toUpperCase().padEnd(10)} ${r.host.padEnd(width)}  ${result}${r.description ? '  ' + r.description : ''}`);
+    const host = hostWithPort(r);
+    lines.push(`${STATE_WORD[r.state].padEnd(10)} ${host}${' '.repeat(width - textWidth(host))}  ${result}${r.description ? '  ' + oneLine(r.description) : ''}`);
   }
   lines.push(stampLine());
   return lines.join('\n');
+}
+
+// -------------------------------------------------------------- copying
+
+/** The JSON envelope with this computer, its address and the time filled in. */
+const jsonCopy = (data) => jsonDoc(source ? source.name : null, source ? source.default_v4 || source.default_v6 || null : null, serverNow(), data);
+const plural = (n, one, many = one + 's') => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+
+/**
+ * The columns copies use: those chosen for the table, in their order, that have a text form. A narrow
+ * window may leave some of them out of view; copies keep them.
+ */
+const copyCols = () => orderedCols().filter((c) => (c.fixed || prefs.cols.includes(c.id)) && c.text);
+
+/** Host rows as a table to copy. A Group column leads when the rows come from more than one group. */
+function hostTable(rows, fmt) {
+  const cols = copyCols();
+  const withGroup = new Set(rows.map((r) => r.group || '')).size > 1;
+  const cell = (c, r) => String(((fmt === 'tsv' && c.sheet) || c.text)(r) ?? '');
+  return {
+    cols: [...(withGroup ? [{ label: 'Group' }] : []), ...cols.map((c) => ({ label: c.copyLabel || c.label, num: !!c.num }))],
+    rows: rows.map((r) => [...(withGroup ? [r.group || ''] : []), ...cols.map((c) => cell(c, r))]),
+  };
+}
+
+/** Copy host rows: text, Markdown or TSV of the columns chosen, or JSON with every field. `what` is for the note. */
+function copyHosts(rows, fmt, what) {
+  if (!rows.length) return;
+  const text = fmt === 'json' ? jsonCopy({ hosts: rows.map(jsonRow) }) : renderTable(hostTable(rows, fmt), fmt, stampLine());
+  copyText(text, `${what} as ${FORMAT_NAME[fmt]}`);
+}
+
+/** The newest copy of these rows (the menu may have been open while pings came in). */
+const fresh = (rows) => rows.map((r) => store.hosts.get(r.id)).filter(Boolean);
+
+/** The hosts as the table shows them: filtered, searched, sorted, less those in closed groups. */
+const shownRows = () => view.hostOrder.map((id) => store.hosts.get(id)).filter(Boolean);
+
+function copyShown(fmt) {
+  const rows = shownRows();
+  copyHosts(rows, fmt, rows.length < store.hosts.size ? `${plural(rows.length, 'host')} shown` : `the table (${plural(rows.length, 'host')})`);
+}
+
+/** The words for "copy the whole table", which says how many when some are hidden. */
+function tableCopyLabel() {
+  const n = view.hostOrder.length;
+  return n < store.hosts.size ? `Copy the ${n.toLocaleString('en-US')} shown as` : 'Copy table as';
+}
+
+/** A menu line: copy the table as it is shown, in one of the formats. */
+const tableCopyItem = () => ({
+  label: tableCopyLabel(),
+  title: 'The hosts the table shows, in its order, with the columns you chose',
+  disabled: !view.hostOrder.length,
+  copy: copyShown,
+});
+
+/** "Copy 192.0.2.1": one cell's value. For several hosts, that column as lines. */
+function cellCopyItem(rows, col) {
+  if (!col || !col.text) col = COL.host;
+  const name = col.copyLabel || col.label;
+  if (rows.length === 1) {
+    const value = oneLine(col.text(rows[0]));
+    if (!value) return null;
+    return { label: 'Copy ' + (/\s/.test(value) ? `“${value}”` : value), hint: name, run: () => copyText(value, value) };
+  }
+  return {
+    label: `Copy the ${name} column`, hint: plural(rows.length, 'line'),
+    run: () => copyText(fresh(rows).map((r) => oneLine(col.text(r))).join('\n'), `${name} of ${plural(rows.length, 'host')}`),
+  };
+}
+
+/** "Copy selected text", when there is a selection inside `area`. Right-click hides the browser's own Copy. */
+function selectionItem(area) {
+  const sel = getSelection();
+  const text = String(sel);
+  if (!text.trim() || !area || !area.contains(sel.anchorNode)) return null;
+  return { label: 'Copy selected text', hint: 'Ctrl+C', run: () => copyText(text, 'the selected text') };
 }
 
 function browserUrl(r) {
@@ -1205,22 +1697,21 @@ function browserUrl(r) {
   return `http://${host}:${r.probe.port}`;
 }
 
-function hostMenu(r) {
-  const { spark, ...plain } = r;
+/** Options for one host. `col` is the column under the pointer, for "Copy <that value>". */
+function hostMenu(r, col) {
   const address = browserUrl(r);
   return {
-    title: r.host,
+    title: hostWithPort(r),
     items: [
-      { label: 'Copy summary', hint: 'Ctrl+C', run: () => copyText(summaryText(r), 'Summary of ' + r.host) },
-      { label: 'Copy host', run: () => copyText(r.host, r.host) },
-      r.ip && r.ip !== r.host && { label: 'Copy IP address', run: () => copyText(r.ip, r.ip) },
-      { label: 'Copy as JSON', run: () => copyText(JSON.stringify(plain, null, 2), 'JSON for ' + r.host) },
+      cellCopyItem([r], col),
+      { label: 'Copy summary', run: () => copyText(summaryText(store.hosts.get(r.id) || r), 'Summary of ' + hostWithPort(r)) },
+      { label: 'Copy host as', title: 'This host with the columns you chose. Ctrl+C copies it as text, Ctrl+Shift+C as Markdown', copy: (fmt) => copyHosts(fresh([r]), fmt, hostWithPort(r)) },
+      tableCopyItem(),
       'sep',
       { label: 'Ping now', disabled: !r.enabled, run: () => hostAction(r.id, { action: 'ping_now' }) },
       { label: r.enabled ? 'Mute' : 'Unmute', hint: 'M', run: () => toggleEnabled(r.id) },
       { label: 'Ping only this host', run: () => bulk('solo', [r.id]) },
       { label: 'Trace route', disabled: r.probe.kind !== 'icmp' && !r.ip, run: () => openTrace(r) },
-      { label: 'Check ports…', hint: 'O', run: () => openPorts(r) },
       { label: 'Measure…', disabled: !r.enabled, run: () => openMeasure([r.id]) },
       store.counts.muted > 0 && { label: 'Unmute every host', run: () => bulk('unmute_all', []) },
       { label: 'Show details', hint: 'Enter', run: () => select(r.id, true) },
@@ -1231,23 +1722,32 @@ function hostMenu(r) {
       {
         label: 'Reset its counters', danger: true,
         run: async () => {
-          if (await confirmBox('RESET ONE HOST', `Counts, times and history for ${r.host} are cleared. This cannot be undone.`, 'RESET')) hostAction(r.id, { action: 'reset' });
+          if (await confirmBox('Reset one host', `Counts, times and history for ${r.host} are cleared. This cannot be undone.`, 'Reset')) hostAction(r.id, { action: 'reset' });
         },
       },
-    ].filter(Boolean),
+    ],
   };
+}
+
+/** A group's hosts as the table shows them (filtered and sorted), even when the group is closed. */
+function groupRows(name) {
+  const item = view.items.find((i) => i.type === 'group' && i.group.name === name);
+  return item ? fresh(item.group.rows) : [];
 }
 
 function groupMenu(g) {
   const closed = view.closed.has(g.name);
   const members = () => [...store.hosts.values()].filter((r) => (r.group || '') === g.name);
+  const name = g.name || 'Ungrouped';
   return {
-    title: g.name || 'Ungrouped',
+    title: name,
     items: [
       { label: 'Add a host here…', hint: 'A', run: () => openAdd(g.name || '') },
       'sep',
-      { label: 'Copy summary', run: () => copyText(groupSummaryText(g), 'Summary of ' + (g.name || 'the group')) },
-      { label: 'Copy hosts', run: () => copyText(members().map((r) => r.host).join('\n'), `${g.total} hosts`) },
+      { label: 'Copy summary', run: () => copyText(groupSummaryText(g), 'Summary of ' + name) },
+      { label: 'Copy host names', run: () => copyText(groupRows(g.name).map(hostWithPort).join('\n'), `Host names in ${name}`) },
+      { label: 'Copy group as', title: 'The hosts of this group the table shows, with the columns you chose', disabled: !g.rows.length, copy: (fmt) => copyHosts(groupRows(g.name), fmt, `${name} (${plural(groupRows(g.name).length, 'host')})`) },
+      tableCopyItem(),
       'sep',
       { label: 'Ping these now', run: () => bulk('ping_now', members().map((r) => r.id)) },
       { label: 'Mute the group', disabled: !members().some((r) => r.enabled), run: () => bulk('mute', members().map((r) => r.id)) },
@@ -1264,13 +1764,15 @@ function selectedRows() {
 }
 
 /** Options for several highlighted hosts at once. */
-function multiMenu(rows) {
+function multiMenu(rows, col) {
   const ids = rows.map((r) => r.id);
   return {
     title: `${rows.length} hosts selected`,
     items: [
-      { label: 'Copy summaries', hint: 'Ctrl+C', run: () => copyText(rows.map(summaryText).join('\n\n'), `Summaries of ${rows.length} hosts`) },
-      { label: 'Copy hosts', run: () => copyText(rows.map((r) => r.host).join('\n'), `${rows.length} hosts`) },
+      cellCopyItem(rows, col),
+      { label: 'Copy summaries', run: () => copyText(fresh(rows).map(summaryText).join('\n\n'), `Summaries of ${rows.length} hosts`) },
+      { label: `Copy ${rows.length} hosts as`, title: 'The selected hosts with the columns you chose. Ctrl+C copies them as text, Ctrl+Shift+C as Markdown', copy: (fmt) => copyHosts(fresh(rows), fmt, plural(rows.length, 'host')) },
+      tableCopyItem(),
       'sep',
       { label: 'Ping now', disabled: !rows.some((r) => r.enabled), run: () => bulk('ping_now', ids) },
       { label: 'Mute', hint: 'M', disabled: !rows.some((r) => r.enabled), run: () => bulk('mute', ids) },
@@ -1283,10 +1785,10 @@ function multiMenu(rows) {
       {
         label: 'Reset their counters', danger: true,
         run: async () => {
-          if (await confirmBox('RESET HOSTS', `Counts, times and history for ${rows.length} hosts are cleared. This cannot be undone.`, 'RESET')) bulk('reset', ids);
+          if (await confirmBox('Reset hosts', `Counts, times and history for ${rows.length} hosts are cleared. This cannot be undone.`, 'Reset')) bulk('reset', ids);
         },
       },
-    ].filter(Boolean),
+    ],
   };
 }
 
@@ -1295,41 +1797,108 @@ function tableMenu() {
   return {
     title: 'Hosts',
     items: [
+      tableCopyItem(),
+      'sep',
       { label: 'Add a host…', hint: 'A', run: () => openAdd() },
-      { label: 'Add a new group…', run: () => openAdd('\u0000new') },
+      { label: 'Add a new group…', run: () => openAdd(NEW_GROUP) },
       { label: 'Import hosts from a file…', run: pickImportFile },
       { label: 'Edit the host list…', hint: 'H', run: () => openHosts() },
-      { label: 'Check ports on a host…', hint: 'O', run: () => openPorts() },
       'sep',
       { label: 'Settings…', hint: ',', run: () => openSettings() },
     ],
   };
 }
 
-function openContextMenu(menu, x, y) {
+// The menu that opens on right-click, on the Menu key, and from the "Copy as…" buttons.
+// An item is { label, hint, run }, or { label, copy(fmt) } for a line of format buttons, or 'sep'.
+
+let ctxReturn = null; // where focus goes back to when the menu closes
+let ctxOpener = null; // the "Copy as…" button the menu drops from, whose aria-expanded follows it
+
+function menuItemHtml(item, i) {
+  if (item === 'sep') return '<div class="menu-sep" role="separator"></div>';
+  const title = item.title ? ` title="${esc(item.title)}"` : '';
+  if (item.copy) {
+    return `<div class="menu-fmt" role="group" aria-label="${esc(item.label)}"${title}><span class="menu-fmt-l">${esc(item.label)}</span>` +
+      FORMATS.map(([f, name]) => `<button class="menu-fmt-b" data-i="${i}" data-f="${f}" role="menuitem" title="${esc(FORMAT_TITLE[f])}"${item.disabled ? ' disabled' : ''}>${name}</button>`).join('') +
+      '</div>';
+  }
+  return `<button class="menu-item${item.danger ? ' menu-danger' : ''}" data-i="${i}" role="menuitem"${item.disabled ? ' disabled' : ''}${title}>` +
+    `<span class="menu-l">${esc(item.label)}</span>${item.hint ? `<span class="hint">${esc(item.hint)}</span>` : ''}</button>`;
+}
+
+/**
+ * Open a menu at x, y, kept on screen. `within` is the open window it belongs to (a modal window
+ * leaves the rest of the page inert, so the menu must sit inside it). `above` is the top of the
+ * button it drops from: when there is no room below, it opens above the button instead.
+ */
+function openContextMenu(menu, x, y, { within = null, above = null, keyboard = false, opener = null } = {}) {
   const el = $('ctx');
-  el.innerHTML = `<div class="menu-title">${esc(menu.title)}</div>` + menu.items
-    .map((item, i) => (item === 'sep'
-      ? '<div class="menu-sep"></div>'
-      : `<button class="menu-item${item.danger ? ' menu-danger' : ''}" data-i="${i}" role="menuitem"${item.disabled ? ' disabled' : ''}>${esc(item.label)}${item.hint ? `<span class="hint">${item.hint}</span>` : ''}</button>`))
-    .join('');
+  if (!el.contains(document.activeElement)) ctxReturn = document.activeElement;
+  const items = menu.items.filter(Boolean);
+  while (items.length && items[0] === 'sep') items.shift();
+  const host = within || document.body;
+  if (el.parentElement !== host) host.appendChild(el);
+  // The title names the menu for a screen reader (aria-labelledby on #ctx); it is not an item itself.
+  el.innerHTML = `<div class="menu-title" id="ctx-title" role="none">${esc(menu.title)}</div>` + items.map(menuItemHtml).join('');
   el.hidden = false;
+  if (ctxOpener && ctxOpener !== opener) ctxOpener.setAttribute('aria-expanded', 'false');
+  ctxOpener = opener;
+  if (opener) opener.setAttribute('aria-expanded', 'true');
   el.onclick = (e) => {
     const button = e.target.closest('[data-i]');
-    if (!button) return;
+    if (!button || button.disabled) return;
+    const item = items[Number(button.dataset.i)];
     closeContextMenu();
-    menu.items[Number(button.dataset.i)].run();
+    if (button.dataset.f) item.copy(button.dataset.f); else item.run();
   };
   const box = el.getBoundingClientRect();
+  const top = above != null && y + box.height > innerHeight - 4 ? above - box.height : y;
   el.style.left = Math.max(4, Math.min(x, innerWidth - box.width - 4)) + 'px';
-  el.style.top = Math.max(4, Math.min(y, innerHeight - box.height - 4)) + 'px';
+  el.style.top = Math.max(4, Math.min(top, innerHeight - box.height - 4)) + 'px';
+  const first = el.querySelector('button:not(:disabled)');
+  (keyboard && first ? first : el).focus({ preventScroll: true });
 }
 
 function closeContextMenu() {
-  $('ctx').hidden = true;
+  const el = $('ctx');
+  if (el.hidden) return;
+  const hadFocus = el.contains(document.activeElement);
+  el.hidden = true;
+  if (ctxOpener) { ctxOpener.setAttribute('aria-expanded', 'false'); ctxOpener = null; }
+  if (hadFocus && ctxReturn && ctxReturn.isConnected) ctxReturn.focus({ preventScroll: true });
+  ctxReturn = null;
 }
 
-function contextMenuForKey(key, x, y) {
+/** Arrow keys move through the menu; left and right move along a line of format buttons. */
+function menuKeys(e) {
+  e.stopPropagation(); // the table's own keys (Enter, Space, M...) must not act while the menu has focus
+  const el = $('ctx');
+  const lines = [...el.querySelectorAll('.menu-item, .menu-fmt')]
+    .map((n) => (n.classList.contains('menu-fmt') ? [...n.querySelectorAll('button')] : [n]).filter((b) => !b.disabled))
+    .filter((line) => line.length);
+  if (!lines.length) return;
+  const at = lines.findIndex((line) => line.includes(document.activeElement));
+  const col = at < 0 ? 0 : lines[at].indexOf(document.activeElement);
+  const go = (li, ci) => { const line = lines[(li + lines.length) % lines.length]; line[Math.min(ci, line.length - 1)].focus(); };
+  if (e.key === 'ArrowDown') go(at + 1, col);
+  else if (e.key === 'ArrowUp') go(at < 0 ? -1 : at - 1, col);
+  else if (e.key === 'ArrowRight' && at >= 0) go(at, Math.min(col + 1, lines[at].length - 1));
+  else if (e.key === 'ArrowLeft' && at >= 0) go(at, Math.max(col - 1, 0));
+  else if (e.key === 'Home' || e.key === 'PageUp') go(0, 0);
+  else if (e.key === 'End' || e.key === 'PageDown') go(lines.length - 1, 0);
+  else if (e.key === 'Escape' || e.key === 'Tab') closeContextMenu();
+  else return;
+  e.preventDefault();
+}
+
+/** The column under the pointer in a host row. */
+function columnAt(target, rowEl) {
+  const td = target.closest('.td');
+  return td && td.parentElement === rowEl ? shown[[...rowEl.children].indexOf(td)] || null : null;
+}
+
+function contextMenuForKey(key, x, y, col = null) {
   if (key.startsWith('g:')) {
     const item = view.items.find((i) => i.key === key);
     if (item) openContextMenu(groupMenu(item.group), x, y);
@@ -1339,11 +1908,12 @@ function contextMenuForKey(key, x, y) {
   if (!r) return;
   // Right-clicking inside a multi-selection acts on all of it.
   if (view.sel.has(r.id) && view.sel.size > 1) {
-    openContextMenu(multiMenu(selectedRows()), x, y);
+    openContextMenu(multiMenu(selectedRows(), col), x, y);
     return;
   }
-  select(r.id);
-  openContextMenu(hostMenu(r), x, y);
+  // Not scrolled into view: the table scrolling would close the menu that is about to open.
+  select(r.id, false, { scroll: false });
+  openContextMenu(hostMenu(r, col), x, y);
 }
 
 // ------------------------------------------------------- measure and trace
@@ -1367,7 +1937,7 @@ function openMeasure(ids) {
     $('measure-setup').hidden = false;
     $('measure-run').hidden = true;
     $('m-start').hidden = false;
-    $('m-start').textContent = 'START';
+    $('m-start').textContent = 'Start';
     $('m-start').disabled = !usable.length;
     $('m-stop').hidden = true;
     $('m-copy').hidden = true;
@@ -1379,7 +1949,9 @@ async function startMeasure() {
   try {
     await api('measure', { method: 'POST', body: { ids: measureIds, duration_secs: Number($('m-duration').value), per_second: Number($('m-rate').value) } });
     showMeasureRun();
-  } catch (err) { $('m-msg').textContent = err.message; }
+  } catch (err) {
+    $('m-msg').textContent = err.message;
+  }
 }
 
 /** Back to the choices, to measure the same hosts again. */
@@ -1397,9 +1969,23 @@ function showMeasureRun() {
   measureTimer = setInterval(pollMeasure, 500);
 }
 
+/**
+ * What a measurement shows for one host. A host is never pinged twice at
+ * once, so a ping still waiting for its timeout stands for the beats that
+ * passed meanwhile: "sent" and "lost" count beats, and loss is their ratio.
+ */
+function measureCounts(x) {
+  const sent = x.expected ?? x.sent;
+  return { sent, lost: sent - (x.sent - x.lost), pings: x.sent };
+}
+
+let measureBusy = false;
 async function pollMeasure() {
+  // A report for many hosts takes a moment to build; do not stack requests for it.
+  if (measureBusy) return;
+  measureBusy = true;
   let m;
-  try { m = (await api('measure')).measurement; } catch { return; }
+  try { m = (await api('measure')).measurement; } catch { return; } finally { measureBusy = false; }
   if (!m) return;
   measureLast = m;
   const rate = `${m.per_second} ${m.per_second === 1 ? 'ping' : 'pings'} a second`;
@@ -1407,38 +1993,49 @@ async function pollMeasure() {
     $('m-clock').textContent = fmtSpan(m.ends_at_ms - serverNow());
     $('m-clock-note').textContent = `left of ${fmtSpan(m.duration_secs * 1000)}, at ${rate}`;
   } else {
-    $('m-clock').textContent = 'DONE';
+    $('m-clock').textContent = 'Done';
     const ran = (m.ended_at_ms ?? m.ends_at_ms) - m.started_at_ms;
     $('m-clock-note').textContent = `ran ${fmtSpan(ran)} at ${rate}, started ${fmtClock(m.started_at_ms)}` + (ran < m.duration_secs * 1000 - 500 ? ' (stopped early)' : '');
     clearInterval(measureTimer);
     $('m-start').hidden = false;
-    $('m-start').textContent = 'MEASURE AGAIN';
+    $('m-start').textContent = 'Measure again';
     $('m-start').disabled = false;
   }
   $('m-stop').hidden = !m.running;
   $('m-copy').hidden = m.running;
   const cell = (us) => `<span class="n${us == null ? ' quiet' : ''}">${fmtMs(us) ?? '–'}</span>`;
   $('m-table').innerHTML =
-    '<div class="hd"><span>Host</span><span class="n">Sent</span><span class="n">Lost</span><span class="n">Loss</span><span class="n">Fastest</span><span class="n">Average</span><span class="n">Median</span><span class="n">95th</span><span class="n">Slowest</span><span class="n">Jitter</span></div>' +
-    m.hosts.map((x) => `<div><span title="${esc(x.description)}"><b>${esc(x.host)}</b></span><span class="n">${x.sent}</span><span class="n${x.lost ? ' bad' : ' quiet'}">${x.lost}</span>` +
-      `<span class="n${x.lost ? ' bad' : ' quiet'}">${fmtPct(x.loss_pct)}</span>${cell(x.min_rtt_us)}${cell(x.avg_rtt_us)}${cell(x.median_rtt_us)}${cell(x.p95_rtt_us)}${cell(x.max_rtt_us)}${cell(x.jitter_us)}</div>`).join('');
+    '<div class="hd"><span>Host</span><span class="n">Sent</span><span class="n">Lost</span><span class="n">Loss</span><span class="n">Fastest ms</span><span class="n">Average ms</span><span class="n">Median ms</span><span class="n">95th ms</span><span class="n">Slowest ms</span><span class="n">Jitter ms</span></div>' +
+    m.hosts.map((x) => {
+      const c = measureCounts(x);
+      const how = c.sent === c.pings ? '' : ` title="${c.pings} pings went out. While one waited for its timeout, the beats that passed count with it."`;
+      return `<div><span class="h" title="${esc(x.description)}">${esc(measureHost(x))}</span><span class="n"${how}>${c.sent}</span><span class="n${c.lost ? ' bad' : ' quiet'}"${how}>${c.lost}</span>` +
+        `<span class="n${c.lost ? ' bad' : ' quiet'}">${fmtPct(x.loss_pct)}</span>${cell(x.min_rtt_us)}${cell(x.avg_rtt_us)}${cell(x.median_rtt_us)}${cell(x.p95_rtt_us)}${cell(x.max_rtt_us)}${cell(x.jitter_us)}</div>`;
+    }).join('');
 }
 
-/** The measurement as fixed-width text for pasting. Times are in milliseconds. */
-function measureReportText(m) {
-  const ms = (us) => fmtMs(us) ?? '-';
-  const width = Math.max(4, ...m.hosts.map((x) => x.host.length));
+/** A measured host as the table shows it: with its port for a TCP monitor. */
+function measureHost(x) {
+  const r = store.hosts.get(x.id);
+  return r && r.host === x.host ? hostWithPort(r) : x.host;
+}
+
+/** The measurement as a table to copy. */
+function measureTable(m) {
   const ran = (m.ended_at_ms ?? m.ends_at_ms) - m.started_at_ms;
-  const lines = [
-    `Measurement: ${fmtSpan(ran)} at ${m.per_second} ${m.per_second === 1 ? 'ping' : 'pings'} a second, started ${fmtClock(m.started_at_ms, true)}`,
-    `${'HOST'.padEnd(width)}  ${['SENT', 'LOST', 'LOSS', 'FASTEST', 'AVERAGE', 'MEDIAN', '95TH', 'SLOWEST', 'JITTER'].map((c) => c.padStart(8)).join('')}`,
-  ];
-  for (const x of m.hosts) {
-    const cells = [x.sent, x.lost, fmtPct(x.loss_pct), ms(x.min_rtt_us), ms(x.avg_rtt_us), ms(x.median_rtt_us), ms(x.p95_rtt_us), ms(x.max_rtt_us), ms(x.jitter_us)];
-    lines.push(`${x.host.padEnd(width)}  ${cells.map((c) => String(c).padStart(8)).join('')}`);
-  }
-  lines.push('Times in milliseconds.', stampLine());
-  return lines.join('\n');
+  let stoodIn = false;
+  const rows = m.hosts.map((x) => {
+    const c = measureCounts(x);
+    if (c.sent !== c.pings) stoodIn = true;
+    return [measureHost(x), String(c.sent), String(c.lost), fmtPct(x.loss_pct), msText(x.min_rtt_us), msText(x.avg_rtt_us), msText(x.median_rtt_us), msText(x.p95_rtt_us), msText(x.max_rtt_us), msText(x.jitter_us)];
+  });
+  const num = (label) => ({ label, num: true });
+  return {
+    title: `Measurement: ${fmtSpan(ran)} at ${m.per_second} ${m.per_second === 1 ? 'ping' : 'pings'} a second, started ${fmtClock(m.started_at_ms, true)}` + (m.running ? ' (still running)' : ''),
+    cols: [{ label: 'Host' }, num('Sent'), num('Lost'), num('Loss'), num('Fastest ms'), num('Average ms'), num('Median ms'), num('95th ms'), num('Slowest ms'), num('Jitter ms')],
+    rows,
+    notes: stoodIn ? ['Sent and lost count beats: a ping still waiting for its timeout stands for the beats that passed meanwhile.'] : [],
+  };
 }
 
 let traceHost = null;
@@ -1447,7 +2044,7 @@ let traceLast = null;
 async function openTrace(r) {
   traceHost = r;
   traceLast = null;
-  $('trace-title').textContent = 'ROUTE TO ' + r.host.toUpperCase();
+  $('trace-title').textContent = 'Route to ' + r.host;
   $('trace-note').textContent = 'Tracing… this takes a second or two.';
   $('trace-table').innerHTML = '';
   $('trace-msg').textContent = '';
@@ -1461,35 +2058,33 @@ async function openTrace(r) {
       : `The trace did not reach ${out.target}. Routers that stay silent show as a dash; many do not answer.`;
     $('trace-table').innerHTML =
       '<div class="hd"><span class="n">Hop</span><span>Address</span><span>Name</span><span class="n">ms</span></div>' +
-      out.hops.map((hop) => `<div><span class="n">${hop.ttl}</span><span${hop.addr ? '' : ' class="quiet"'}>${hop.addr ? `<b>${esc(hop.addr)}</b>` : '–'}</span>` +
-        `<span class="quiet">${esc(hop.name ?? (hop.addr ? '' : 'no answer'))}</span><span class="n${hop.rtt_us == null ? ' quiet' : ''}">${fmtMs(hop.rtt_us) ?? '–'}</span></div>`).join('');
+      out.hops.map((hop) => `<div><span class="n">${hop.ttl}</span><span${hop.addr ? ' class="h"' : ' class="quiet"'}>${hop.addr ? esc(hop.addr) : '–'}</span>` +
+        `<span class="quiet">${esc(hop.name ?? (hop.addr ? '' : 'No answer'))}</span><span class="n${hop.rtt_us == null ? ' quiet' : ''}">${fmtMs(hop.rtt_us) ?? '–'}</span></div>`).join('');
   } catch (err) {
     $('trace-note').textContent = err.message;
   }
 }
 
-function traceText(out) {
-  const lines = [`Route to ${out.host} (${out.target}) from ${out.from}${out.source ? ` (${out.source})` : ''}`];
-  for (const hop of out.hops) {
-    lines.push(`${String(hop.ttl).padStart(2)}  ${(hop.addr ?? '*').padEnd(39)} ${(fmtMs(hop.rtt_us) ?? '*').padStart(8)} ms  ${hop.name ?? ''}`.trimEnd());
-  }
-  if (!out.reached) lines.push('The trace did not reach the host.');
-  lines.push(stampLine());
-  return lines.join('\n');
+/** The route as a table to copy. */
+function traceTable(out) {
+  return {
+    title: `Route to ${out.host} (${out.target}) from ${out.from}${out.source ? ` (${out.source})` : ''}`,
+    cols: [{ label: 'Hop', num: true }, { label: 'Address' }, { label: 'Name' }, { label: 'ms', num: true }],
+    rows: out.hops.map((hop) => [String(hop.ttl), hop.addr ?? '', hop.name ?? (hop.addr ? '' : 'No answer'), msText(hop.rtt_us)]),
+    notes: out.reached ? [] : ['The trace did not reach the host.'],
+  };
 }
 
-// -------------------------------------------------------------- port check
+// ------------------------------------------------------------- TCP choices
 
-/** TCP ports offered as one-click choices. Keep in step with COMMON_PORTS in crates/core/src/portcheck.rs. */
+/** TCP endpoints offered in the Add hosts window. */
 const PORT_CHOICES = [[22, 'SSH'], [80, 'HTTP'], [443, 'HTTPS'], [3389, 'RDP'], [445, 'SMB'], [53, 'DNS'], [25, 'SMTP'], [3306, 'MySQL'], [5432, 'Postgres'], [1433, 'MSSQL'], [8080, 'HTTP alt'], [8443, 'HTTPS alt']];
-const PORT_STATE = { open: 'OPEN, listening', closed: 'CLOSED, refused', no_answer: 'NO ANSWER' };
-const PORTS_HELP = 'One TCP connection is opened to each port and closed again; nothing is sent. OPEN means something is listening. CLOSED means the host answered and refused. NO ANSWER usually means a firewall dropped it, or the host is off.';
 
 /** Fill a row of toggle buttons: an optional PING choice, then the first `count` common ports. */
 function renderChips(el, { ping = false, count = PORT_CHOICES.length, on = [] } = {}) {
   const chip = (attr, isOn, title, text) => `<button type="button" class="chip${isOn ? ' is-on' : ''}" ${attr} aria-pressed="${isOn}" title="${title}">${text}</button>`;
   el.innerHTML =
-    (ping ? chip('data-ping', on.includes('ping'), 'ICMP echo: is the host there?', 'PING') : '') +
+    (ping ? chip('data-ping', on.includes('ping'), 'ICMP echo: is the host there?', 'Ping') : '') +
     PORT_CHOICES.slice(0, count).map(([port, name]) => chip(`data-port="${port}"`, on.includes(port), `TCP ${port}: is ${name} listening?`, `${port}<i>${name}</i>`)).join('');
 }
 const chipPorts = (el) => [...el.querySelectorAll('.chip.is-on[data-port]')].map((b) => Number(b.dataset.port));
@@ -1500,93 +2095,6 @@ function toggleChip(e) {
   const on = !chip.classList.contains('is-on');
   chip.classList.toggle('is-on', on);
   chip.setAttribute('aria-pressed', String(on));
-}
-
-let portsGroup = null; // the group "watch in the table" adds rows to
-let portsLast = null;  // the last answer, for copy and watch
-let portsSeq = 0;
-
-/** Open the port check window, for row `r` when there is one. Nothing is sent until CHECK. */
-function openPorts(r) {
-  r = r || (view.selected != null ? store.hosts.get(view.selected) : null) || null;
-  portsGroup = r ? r.group || '' : null;
-  portsLast = null;
-  portsSeq++;
-  const remembered = Array.isArray(prefs.ports) && prefs.ports.length ? prefs.ports : [22, 80, 443, 3389];
-  const own = r && r.probe.kind === 'tcp' ? r.probe.port : null;
-  const isChoice = own != null && PORT_CHOICES.some(([port]) => port === own);
-  renderChips($('pc-chips'), { on: isChoice ? [own, ...remembered] : remembered });
-  $('pc-host').value = r ? r.host : '';
-  $('pc-ports').value = own != null && !isChoice ? String(own) : '';
-  $('pc-note').textContent = PORTS_HELP;
-  $('pc-table').innerHTML = '';
-  $('pc-msg').textContent = '';
-  $('pc-msg').classList.remove('bad');
-  $('pc-copy').hidden = true;
-  $('pc-watch').hidden = true;
-  $('pc-go').disabled = false;
-  if (!$('dlg-ports').open) $('dlg-ports').showModal();
-  (r ? $('pc-go') : $('pc-host')).focus();
-}
-
-const portStateText = (p) => PORT_STATE[p.state] ?? STATUS_LABEL[p.status] ?? 'Failed';
-
-async function runPortCheck() {
-  const host = $('pc-host').value.trim();
-  const ports = chipPorts($('pc-chips'));
-  const msg = $('pc-msg');
-  msg.classList.add('bad');
-  if (!host) { msg.textContent = 'Type a host name or an address.'; $('pc-host').focus(); return; }
-  const mine = ++portsSeq;
-  msg.classList.remove('bad');
-  msg.textContent = 'Checking… a port that does not answer takes a few seconds.';
-  $('pc-go').disabled = true;
-  try {
-    const out = await api('portcheck', { method: 'POST', body: { host, ports, ports_text: $('pc-ports').value.trim() } });
-    if (mine !== portsSeq) return;
-    portsLast = out;
-    prefs.ports = ports;
-    savePrefs();
-    const n = out.results.length;
-    msg.textContent = '';
-    $('pc-note').textContent = `${out.open} of ${n} ${n === 1 ? 'port' : 'ports'} open on ${out.host}${out.target !== out.host ? ` (${out.target})` : ''}, checked from ${out.from}${out.source ? ` (${out.source})` : ''} at ${fmtClock(out.checked_at_ms)}, waiting up to ${out.timeout_ms} ms for each. ${PORTS_HELP}`;
-    $('pc-table').innerHTML =
-      '<div class="hd"><span class="n">Port</span><span>Usually</span><span>Result</span><span class="n">ms</span></div>' +
-      out.results.map((p) => `<div><span class="n"><b>${p.port}</b></span><span class="quiet">${esc(p.service ?? '')}</span>` +
-        `<span class="${p.state}">${esc(portStateText(p))}</span><span class="n${p.rtt_us == null ? ' quiet' : ''}">${fmtMs(p.rtt_us) ?? '–'}</span></div>`).join('');
-    $('pc-copy').hidden = false;
-    $('pc-watch').hidden = false;
-  } catch (err) {
-    if (mine === portsSeq) { msg.classList.add('bad'); msg.textContent = err.message; }
-  } finally {
-    if (mine === portsSeq) $('pc-go').disabled = false;
-  }
-}
-
-function portsText(out) {
-  const lines = [`Port check of ${out.host}${out.target !== out.host ? ` (${out.target})` : ''} from ${out.from}${out.source ? ` (${out.source})` : ''}`];
-  for (const p of out.results) {
-    lines.push(`${String(p.port).padStart(5)}  ${(p.service ?? '').padEnd(16)} ${portStateText(p).padEnd(18)}${p.rtt_us == null ? '' : (fmtMs(p.rtt_us) + ' ms').padStart(10)}`.trimEnd());
-  }
-  lines.push(stampLine());
-  return lines.join('\n');
-}
-
-/** Turn the ports just checked into rows, so they are checked all the time. */
-async function watchPorts() {
-  const out = portsLast;
-  if (!out) return;
-  const msg = $('pc-msg');
-  const watched = new Set([...store.hosts.values()].filter((r) => r.host === out.host && r.probe.kind === 'tcp').map((r) => r.probe.port));
-  const ports = out.results.map((p) => p.port).filter((port) => !watched.has(port));
-  msg.classList.remove('bad');
-  if (!ports.length) { msg.textContent = 'These ports are already rows in the table.'; return; }
-  try {
-    const group = portsGroup ?? likelyGroup();
-    const added = await api('hosts/add', { method: 'POST', body: { entries: [out.host], group: group || null, ports, ping: false } });
-    msg.textContent = `Added ${added.added} ${added.added === 1 ? 'row' : 'rows'}${group ? ' to ' + group : ''}. They are checked with the rest from now on.`;
-    if (!store.running && loaded.autostart !== false) control('start');
-  } catch (err) { msg.classList.add('bad'); msg.textContent = err.message; }
 }
 
 async function restoreDefaultHosts() {
@@ -1605,18 +2113,13 @@ async function restoreDefaultHosts() {
 
 async function useExampleHosts() {
   try {
-    const [defaults, cfg] = await Promise.all([api('defaults'), api('config')]);
+    const defaults = await api('defaults');
     await api('config', {
       method: 'PUT',
-      body: {
-        settings: { ...cfg.settings, description_format: defaults.settings.description_format },
-        hosts_text: defaults.hosts_text,
-        keep_stats: false,
-        autostart: cfg.autostart,
-      },
+      body: { settings: { description_format: defaults.settings.description_format }, hosts_text: defaults.hosts_text, keep_stats: false },
     });
     await control('start');
-  } catch (err) { toast('down', 'ERROR', err.message); }
+  } catch (err) { toast('down', 'Error', err.message); }
 }
 
 async function openAbout() {
@@ -1631,14 +2134,14 @@ async function openAbout() {
       ['Built with', `Rust ${info.rustc}, compiled for ${info.target}`],
       ['This computer', info.machine + (source && source.default_v4 ? `, sending from ${source.default_v4}` : '')],
       ['Pings sent with', info.icmp],
-      ['Port checks', 'a TCP connection to the port, closed at once; nothing is sent'],
-      ['Command line', 'pingtable-cli, beside the app: once, ports, or --help'],
+      ['TCP monitoring', 'a TCP connection to the port, closed at once; nothing is sent'],
+      ['Command line', 'pingtable-cli, beside the app: once, api, or --help'],
       ['AI agents', 'pingtable-cli mcp serves these checks as tools; pingtable-cli api shows the local API'],
       ['Shown in', window.__PINGTABLE_SHELL__ ? 'its own window (Microsoft Edge WebView2)' : 'your browser'],
       ['Settings file', info.config_path],
     ];
     $('about-facts').innerHTML = facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
-    $('about-libs').textContent = 'Uses the open-source libraries ' + info.libraries.join(', ') + '.';
+    $('about-libs').textContent = 'Uses the open-source libraries ' + info.libraries.join(', ') + '. Data is set in JetBrains Mono, under the SIL Open Font License 1.1.';
   } catch (err) { $('about-version').textContent = err.message; }
   $('dlg-about').showModal();
 }
@@ -1653,6 +2156,9 @@ function buildMenu() {
     .map((c) => `<button class="menu-item${prefs.cols.includes(c.id) ? ' is-checked' : ''}" data-col="${c.id}"><span class="check"></span>${esc(c.label)}</button>`)
     .join('');
   $('mi-group').classList.toggle('is-checked', prefs.grouped);
+  $('mi-density').classList.toggle('is-checked', prefs.density === 'roomy');
+  $('mi-copy-l').textContent = tableCopyLabel();
+  $('mi-copy').querySelectorAll('[data-f]').forEach((b) => { b.title = FORMAT_TITLE[b.dataset.f]; b.disabled = !view.hostOrder.length; });
   $('mi-sound').classList.toggle('is-checked', prefs.sound);
   $('mi-unmute').disabled = store.counts.muted === 0;
 }
@@ -1661,8 +2167,23 @@ function toggleMenu(open) {
   const menu = $('menu');
   const show = open ?? menu.hidden;
   if (show) buildMenu();
+  if (!show && menu.contains(document.activeElement)) $('btn-menu').focus({ preventScroll: true });
   menu.hidden = !show;
+  if (show) placeMenu();
   $('btn-menu').setAttribute('aria-expanded', String(show));
+}
+
+/**
+ * The main menu hangs from its button, placed against the window rather than the bar: in a narrow
+ * window the buttons sit on a row that scrolls sideways, and that row would cut the menu off.
+ */
+function placeMenu() {
+  const menu = $('menu');
+  const box = $('btn-menu').getBoundingClientRect();
+  menu.style.top = Math.round(box.bottom + 4) + 'px';
+  menu.style.right = Math.max(4, Math.round(innerWidth - box.right)) + 'px';
+  // Fit the room below the button.
+  menu.style.maxHeight = Math.max(160, innerHeight - box.bottom - 12) + 'px';
 }
 
 function moveSelection(delta) {
@@ -1671,6 +2192,14 @@ function moveSelection(delta) {
   const at = order.indexOf(view.selected);
   const next = at < 0 ? (delta > 0 ? 0 : order.length - 1) : Math.min(order.length - 1, Math.max(0, at + delta));
   select(order[next]);
+}
+
+/** A "Copy as…" button: its menu drops from the button (or rises, near the bottom of the window). */
+function openCopyMenu(e, kind) {
+  const menu = copyMenuFor(kind);
+  if (!menu) return;
+  const box = e.currentTarget.getBoundingClientRect();
+  openContextMenu(menu, box.left, box.bottom + 2, { within: e.currentTarget.closest('dialog'), above: box.top - 2, keyboard: e.detail === 0, opener: e.currentTarget });
 }
 
 // ---------------------------------------------------------------- wiring
@@ -1765,8 +2294,6 @@ function wire() {
   $('search').addEventListener('input', (e) => { view.query = e.target.value.trim().toLowerCase(); schedule(); });
   $('btn-toggle').addEventListener('click', () => control(store.running || store.measureEndsAt != null ? 'stop' : 'start'));
   $('btn-add').addEventListener('click', () => openAdd());
-  $('btn-ports').addEventListener('click', () => openPorts());
-  $('mi-ports').addEventListener('click', () => { toggleMenu(false); openPorts(); });
   $('mi-import').addEventListener('click', () => { toggleMenu(false); pickImportFile(); });
   $('foot-src').addEventListener('click', () => openSettings('network'));
   $('foot-rate').addEventListener('click', () => openSettings('pinging'));
@@ -1781,16 +2308,9 @@ function wire() {
   $('add-import').addEventListener('click', pickImportFile);
   $('add-ports').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addHosts(); } });
 
-  // Port check window
-  $('pc-chips').addEventListener('click', toggleChip);
-  $('pc-go').addEventListener('click', runPortCheck);
-  $('pc-close').addEventListener('click', () => $('dlg-ports').close());
-  $('pc-copy').addEventListener('click', () => { if (portsLast) copyText(portsText(portsLast), 'Port check of ' + portsLast.host); });
-  $('pc-watch').addEventListener('click', watchPorts);
-  for (const id of ['pc-host', 'pc-ports']) $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runPortCheck(); } });
   $('add-close').addEventListener('click', () => $('dlg-add').close());
   $('add-group').addEventListener('change', () => {
-    const fresh = $('add-group').value === '\u0000new';
+    const fresh = $('add-group').value === NEW_GROUP;
     $('add-new-wrap').hidden = !fresh;
     if (fresh) $('add-new').focus();
   });
@@ -1880,13 +2400,20 @@ function wire() {
   $('btn-empty-example').addEventListener('click', useExampleHosts);
   $('btn-defaults').addEventListener('click', restoreDefaultHosts);
 
-  // Right-click a row for its options. Elsewhere the browser's own menu stays,
-  // except in the Windows window, where it would only offer Back and Reload.
+  // Right-click a row for its options, and the detail panel or a result table to copy it.
+  // Elsewhere the browser's own menu stays, except in the Windows window, where it would
+  // only offer Back and Reload.
   document.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('#ctx')) { e.preventDefault(); return; }
     const row = e.target.closest('#tbody [data-key]');
+    const area = e.target.closest('[data-copy]');
+    const menu = !row && area && !e.target.closest('input, textarea, select') ? copyMenuFor(area.dataset.copy) : null;
     if (row) {
       e.preventDefault();
-      contextMenuForKey(row.dataset.key, e.clientX, e.clientY);
+      contextMenuForKey(row.dataset.key, e.clientX, e.clientY, columnAt(e.target, row));
+    } else if (menu) {
+      e.preventDefault();
+      openContextMenu(menu, e.clientX, e.clientY, { within: area.closest('dialog') });
     } else if (e.target.closest('#grid') && !e.target.closest('.thead')) {
       e.preventDefault();
       openContextMenu(tableMenu(), e.clientX, e.clientY);
@@ -1895,8 +2422,13 @@ function wire() {
     }
   });
   document.addEventListener('pointerdown', (e) => { if (!$('ctx').hidden && !e.target.closest('#ctx')) closeContextMenu(); });
+  $('ctx').addEventListener('keydown', menuKeys);
+  // A window closing takes the menu inside it along; put it back where the table can use it.
+  document.querySelectorAll('dialog').forEach((dlg) => dlg.addEventListener('close', () => {
+    if (dlg.contains($('ctx'))) { closeContextMenu(); document.body.appendChild($('ctx')); }
+  }));
   addEventListener('blur', closeContextMenu);
-  addEventListener('resize', closeContextMenu);
+  addEventListener('resize', () => { closeContextMenu(); if (!$('menu').hidden) placeMenu(); });
 
   $('btn-menu').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
   document.addEventListener('click', (e) => { if (!$('menu').hidden && !e.target.closest('.menu-wrap')) toggleMenu(false); });
@@ -1906,21 +2438,33 @@ function wire() {
     const id = item.dataset.col;
     prefs.cols = prefs.cols.includes(id) ? prefs.cols.filter((c) => c !== id) : [...prefs.cols, id];
     savePrefs(); buildMenu(); layoutColumns(); schedule();
+    if (e.detail === 0) $('menu-cols').querySelector(`[data-col="${id}"]`).focus();
   });
   $('mi-group').addEventListener('click', () => { prefs.grouped = !prefs.grouped; savePrefs(); buildMenu(); schedule(); });
+  $('mi-density').addEventListener('click', () => {
+    prefs.density = prefs.density === 'roomy' ? 'compact' : 'roomy';
+    savePrefs(); applyDensity(); buildMenu(); layoutColumns(); schedule(); scrollToSelected();
+  });
+  $('mi-copy').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-f]');
+    if (!b) return;
+    toggleMenu(false);
+    copyShown(b.dataset.f);
+  });
   $('mi-sound').addEventListener('click', () => { prefs.sound = !prefs.sound; savePrefs(); buildMenu(); if (prefs.sound) beep('up'); });
   $('btn-theme').addEventListener('click', toggleTheme);
+  $('note-close').addEventListener('click', () => { $('note-banner').hidden = true; $('note-list').textContent = ''; });
   $('mi-unmute').addEventListener('click', () => { toggleMenu(false); bulk('unmute_all', []); });
   $('mi-now').addEventListener('click', () => { toggleMenu(false); control('ping_now'); });
   $('mi-measure').addEventListener('click', () => { toggleMenu(false); openMeasure(view.sel.size > 1 ? [...view.sel] : null); });
   $('run-state').addEventListener('click', () => { if (store.measureEndsAt != null) openMeasure(null); });
   $('m-start').addEventListener('click', () => { if ($('measure-run').hidden) startMeasure(); else openMeasureSetup(); });
   $('m-stop').addEventListener('click', () => api('measure/stop', { method: 'POST', body: {} }).then(pollMeasure).catch(() => {}));
-  $('m-copy').addEventListener('click', () => { if (measureLast) copyText(measureReportText(measureLast), 'Measurement report'); });
+  $('m-copy').addEventListener('click', (e) => openCopyMenu(e, 'measure'));
   $('m-close').addEventListener('click', () => $('dlg-measure').close());
   $('dlg-measure').addEventListener('close', () => clearInterval(measureTimer));
   $('trace-again').addEventListener('click', () => { if (traceHost) openTrace(traceHost); });
-  $('trace-copy').addEventListener('click', () => { if (traceLast) copyText(traceText(traceLast), 'Route to ' + traceLast.host); });
+  $('trace-copy').addEventListener('click', (e) => openCopyMenu(e, 'trace'));
   $('mi-csv').addEventListener('click', (e) => { e.preventDefault(); toggleMenu(false); download('csv'); });
   $('mi-json').addEventListener('click', (e) => { e.preventDefault(); toggleMenu(false); download('json'); });
   $('mi-keys').addEventListener('click', () => { toggleMenu(false); $('dlg-keys').showModal(); });
@@ -1934,7 +2478,7 @@ function wire() {
   });
   $('mi-reset').addEventListener('click', async () => {
     toggleMenu(false);
-    if (await confirmBox('RESET COUNTERS', 'Every count, time and history line is cleared. The host list stays. This cannot be undone.', 'RESET')) control('reset');
+    if (await confirmBox('Reset counters', 'Every count, time and history line is cleared. The host list stays. This cannot be undone.', 'Reset')) control('reset');
   });
 
   // detail
@@ -1964,6 +2508,7 @@ function wire() {
   $('f-hosts').addEventListener('input', preview);
   ['f-described', 'f-skipfirst', 'f-skiplast'].forEach((id) => $(id).addEventListener('change', preview));
   $('dlg-cancel').addEventListener('click', () => $('dlg-hosts').close());
+  $('dlg-reload').addEventListener('click', reloadHosts);
   $('dlg-apply').addEventListener('click', () => applyHosts(true));
   $('dlg-reset').addEventListener('click', () => applyHosts(false));
   $('f-hosts').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); applyHosts(true); } });
@@ -1981,12 +2526,15 @@ function wire() {
       else if (view.filter !== 'all') setFilter('all');
       return;
     }
-    if (typing) return;
+    if (typing || e.target.closest('#menu')) return;
+    // A focused control owns its activation keys, even when a host is selected.
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('button, a[href]')) return;
     const selected = view.selected != null ? store.hosts.get(view.selected) : null;
     const rows = selectedRows();
+    // Ctrl+C copies the highlighted hosts as a text table, Ctrl+Shift+C as Markdown. Selected text copies as usual.
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && rows.length && !String(getSelection())) {
       e.preventDefault();
-      copyText(rows.map(summaryText).join('\n\n'), rows.length === 1 ? 'Summary of ' + rows[0].host : `Summaries of ${rows.length} hosts`);
+      copyHosts(rows, e.shiftKey ? 'md' : 'text', rows.length === 1 ? hostWithPort(rows[0]) : plural(rows.length, 'host'));
       return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && view.hostOrder.length) {
@@ -2000,7 +2548,7 @@ function wire() {
       e.preventDefault();
       const rowEl = document.querySelector(`#tbody [data-key="h:${selected.id}"]`);
       const box = rowEl ? rowEl.getBoundingClientRect() : { left: 40, bottom: 120 };
-      openContextMenu(rows.length > 1 ? multiMenu(rows) : hostMenu(selected), box.left + 40, box.bottom - 4);
+      openContextMenu(rows.length > 1 ? multiMenu(rows) : hostMenu(selected), box.left + 40, box.bottom - 4, { keyboard: true });
       return;
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -2023,7 +2571,6 @@ function wire() {
       h: () => openHosts(),
       a: () => openAdd(),
       Insert: () => openAdd(),
-      o: () => openPorts(),
       ',': () => openSettings(),
       Delete: () => { const rows = selectedRows(); if (rows.length) removeHosts(rows); },
       g: () => { prefs.grouped = !prefs.grouped; savePrefs(); schedule(); },
@@ -2040,14 +2587,37 @@ function wire() {
 
 // ------------------------------------------------------------------ boot
 
-if (!token) {
-  $('gate').hidden = false;
-} else {
+/** The version and other facts for the footer. Asked again after a poll while it is missing. */
+let infoBusy = false;
+async function loadInfo() {
+  if (infoBusy) return appInfo;
+  infoBusy = true;
+  try { appInfo = await api('info'); schedule(false); } catch (err) {
+    if (err.message === 'unauthorized') throw err;
+  } finally { infoBusy = false; }
+  return appInfo;
+}
+
+async function boot() {
+  applyDensity();
   layoutColumns();
   wire();
   applyTheme();
+  try {
+    await loadInfo();
+  } catch {
+    // The link's token was refused (an old link, say): the saved one may still be good.
+    if (!(linkToken && savedToken && savedToken !== linkToken)) return; // refused: the page asks for the link
+    token = savedToken;
+    $('gate').hidden = true;
+    try { await loadInfo(); } catch { return; }
+  }
+  // When /info failed for another reason (pingtable still starting, say), carry on: the first reply that
+  // works saves the token, and the poll asks for the version again.
   loadSource().then(() => schedule(false));
   refreshConfig();
-  api('info').then((info) => { appInfo = info; schedule(false); }).catch(() => {});
   poll();
 }
+
+if (!token) $('gate').hidden = false;
+else boot();

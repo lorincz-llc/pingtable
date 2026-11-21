@@ -29,7 +29,8 @@ pub struct Hop {
 }
 
 /// Trace the path to `target`. Takes about one `timeout`, because every hop
-/// is probed at once.
+/// is probed at once, and with `resolve_names` at most
+/// [`netinfo::LOOKUP_LIMIT`] more for the names.
 pub fn traceroute(target: IpAddr, max_hops: u8, timeout: Duration, resolve_names: bool) -> Vec<Hop> {
     let max_hops = max_hops.clamp(1, MAX_HOPS);
     let probe_hop = |ttl: u8| -> Hop {
@@ -66,7 +67,12 @@ pub fn traceroute(target: IpAddr, max_hops: u8, timeout: Duration, resolve_names
 
     if resolve_names {
         let names: Vec<Option<String>> = thread::scope(|scope| {
-            let handles: Vec<_> = hops.iter().map(|h| h.addr).map(|addr| scope.spawn(move || addr.and_then(netinfo::reverse))).collect();
+            // Each name gets the same limit, and they are looked up side by side.
+            let handles: Vec<_> = hops
+                .iter()
+                .map(|h| h.addr)
+                .map(|addr| scope.spawn(move || addr.and_then(|ip| netinfo::reverse_within(ip, netinfo::LOOKUP_LIMIT))))
+                .collect();
             handles.into_iter().map(|h| h.join().ok().flatten()).collect()
         });
         for (hop, name) in hops.iter_mut().zip(names) {

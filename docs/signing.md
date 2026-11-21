@@ -1,120 +1,60 @@
-# Signing the Windows programs
+# Windows releases and signing
 
-Signed programs show a publisher name instead of "unknown publisher", and an
-IT department can allow that publisher. This page is for whoever makes the
-releases. Facts about Microsoft's service were checked on 17 Nov 2026 and
-change; the links are the authority.
+Pingtable publishes two free Windows ZIPs from a version tag. Both carry the full table, CLI, local API and MCP server. The native edition includes the WebView2 desktop window. The browser edition runs the table in the default browser. The current GitHub workflow produces unsigned Pingtable executables and checks that the release notes say so. The public release also carries GitHub build provenance for both ZIPs. Windows can display “unknown publisher” until the project obtains a trusted Authenticode signature.
 
-`scripts/sign-windows.sh` signs `pingtable.exe` and `pingtable-cli.exe` with
-[Microsoft Artifact Signing](https://azure.microsoft.com/en-us/products/artifact-signing)
-(formerly Trusted Signing) through [jsign](https://ebourg.github.io/jsign/),
-which runs on Linux as well as Windows. `scripts/package-windows.sh` calls it
-by itself once the three settings below exist. Until then it packages
-unsigned programs and says so in the zip and in the release notes.
+## Publish a release
 
-## Once: set up the service
+1. Set the workspace version in `Cargo.toml`, update `Cargo.lock`, and add the matching version section to `CHANGELOG.md`. Refresh third-party notices after changes to dependencies, bundled fonts or the Windows loader.
+2. Commit the reviewed changes and push that commit to the release branch. Create an annotated tag on the intended commit and push only that tag. For example, the 0.4.0 tag is `v0.4.0`.
+3. Watch **Actions → Release** for the tag. Ubuntu tests the tagged sources, cross-builds both editions with MinGW, checks their SHA-256 digests and records build provenance. A Windows runner opens each archive, checks the digest and Authenticode status, runs each packaged CLI with `--version`, and runs the workspace tests and Clippy.
+4. The publish job takes the exact artifact tested on Windows. It checks the assets in a draft, then publishes the generated release notes, both ZIPs, both individual checksum files and `SHA256SUMS`. Use the published ZIPs for any package-manager submission.
 
-Microsoft's own walk-through is the
-[quickstart](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart).
-In short:
+The workflow pins its actions to upstream commit SHAs. When upgrading an action, review the upstream release, resolve its version tag to the commit, and update both the SHA and its version comment. Keep the tested Rust version consistent with CI. The packaging step needs the Rust documentation component for the toolchain license files. [Release workflow](../.github/workflows/release.yml) · [GitHub Actions security guidance](https://docs.github.com/en/actions/reference/security/secure-use)
 
-1. **An Azure subscription** that can be billed. The Basic plan is about
-   $9.99 a month.
-2. **An Artifact Signing account**, in one region. Note the region's
-   endpoint from the table below.
-3. **Identity validation for the organisation.** Microsoft checks the
-   company: a website and mailboxes on a company-owned domain, a business
-   identifier, and an identity check on a person. It can take from a day to
-   several weeks. Microsoft's pages disagree on whether a company needs
-   three years of history, so a young company may be refused.
-4. **A certificate profile** of the Public Trust kind, using that validated
-   identity. The name on the profile is the name Windows will show.
-5. **Permission to sign.** The account that signs needs the role
-   "Artifact Signing Certificate Profile Signer" on the profile
-   ([how](https://learn.microsoft.com/en-us/azure/artifact-signing/tutorial-assign-roles)).
+### Recover an interrupted release
 
-The endpoint must be the region the account and the profile were created in;
-another one answers 403.
+Use **Re-run failed jobs** on the original tagged run. The publish job downloads the build artifact by ID. It fills gaps in a draft and compares existing assets byte for byte. If a draft contains different bytes, inspect the draft and job logs before deciding which build to keep. When the tag is already published, the job downloads and verifies its published checksums and leaves the release intact. Ship a new patch version when published files need a correction. The Actions artifact is retained for 30 days. [GitHub release protection](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
 
-| Region | Endpoint |
-|---|---|
-| East US | `eus.codesigning.azure.net` |
-| Central US | `cus.codesigning.azure.net` |
-| North Central US | `ncus.codesigning.azure.net` |
-| South Central US | `scus.codesigning.azure.net` |
-| West Central US | `wcus.codesigning.azure.net` |
-| West US | `wus.codesigning.azure.net` |
-| West US 2 | `wus2.codesigning.azure.net` |
-| West US 3 | `wus3.codesigning.azure.net` |
-| North Europe | `neu.codesigning.azure.net` |
-| West Europe | `weu.codesigning.azure.net` |
-| Poland Central | `plc.codesigning.azure.net` |
-| Switzerland North | `swn.codesigning.azure.net` |
-| Brazil South | `brs.codesigning.azure.net` |
-| Japan East | `jpe.codesigning.azure.net` |
-| Korea Central | `krc.codesigning.azure.net` |
+### Verify a download
 
-([Microsoft's list](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-signing-integrations))
-
-## Once: set up the build machine
-
-1. **Java 8 or newer.**
-2. **jsign.** Download `jsign-7.6.jar` (2.5 MB) from its
-   [releases page](https://github.com/ebourg/jsign/releases/tag/7.6). GitHub
-   lists its SHA-256 as
-   `6cf58aa080e7ff82656f320cff8d4a3bff30408df8766806dcba3740dd839fa5`;
-   compare before using it.
-3. **The Azure CLI**, signed in with `az login` as the account that has the
-   signer role. The script asks it for a short-lived token each time.
-4. **A file named `signing.env`** beside `Cargo.toml`. It is ignored by git
-   and holds no secret:
-
-   ```
-   PINGTABLE_SIGN_ENDPOINT=eus.codesigning.azure.net
-   PINGTABLE_SIGN_ACCOUNT=your-account-name
-   PINGTABLE_SIGN_PROFILE=your-profile-name
-   JSIGN_JAR=/path/to/jsign-7.6.jar
-   ```
-
-   `JAVA=/path/to/java` as well, if `java` is not on the PATH.
-
-Without the Azure CLI, set `PINGTABLE_SIGN_TOKEN` to an access token, or set
-`AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` for a service
-principal and jsign signs in by itself.
-
-## Every release
+Run these commands in the directory containing both ZIPs and the release’s `SHA256SUMS`. Adjust the version when checking another release.
 
 ```bash
-scripts/package-windows.sh
+sha256sum --check SHA256SUMS
+gh attestation verify pingtable-0.4.0-windows-x64.zip --repo lorincz-llc/pingtable --source-ref refs/tags/v0.4.0 --signer-workflow lorincz-llc/pingtable/.github/workflows/release.yml
+gh attestation verify pingtable-0.4.0-browser-windows-x64.zip --repo lorincz-llc/pingtable --source-ref refs/tags/v0.4.0 --signer-workflow lorincz-llc/pingtable/.github/workflows/release.yml
 ```
 
-builds, signs, checks and packages. On a Windows machine (WSL included) the
-script asks Windows whether each signature is valid and stops if one is not.
-To check at any time:
+The digest checks the downloaded bytes. Attestation verification also checks the repository, workflow and source tag. Authenticode separately identifies the executable’s publisher to Windows. GitHub supports public-repository attestations. Private repositories on a plan with attestation support can set `ENABLE_PRIVATE_ATTESTATIONS=true` to enable the same workflow step. [Artifact attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations) · [GitHub CLI verification options](https://cli.github.com/manual/gh_attestation_verify)
 
-```bash
-scripts/sign-windows.sh --verify
+## Microsoft Artifact Signing
+
+Use a **Public Trust** certificate profile if Windows should show the project’s validated organization as the publisher. The owner needs an Azure subscription, a supported signing region, a signing account, approved organizational identity validation and a certificate profile tied to that identity. Assign the **Artifact Signing Certificate Profile Signer** role at the profile scope to the identity doing the signing. Check Microsoft’s current eligibility requirements, pricing and regional endpoint before enrolling. [Microsoft quickstart](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart) · [Role assignment](https://learn.microsoft.com/en-us/azure/artifact-signing/tutorial-assign-roles) · [Pricing](https://azure.microsoft.com/en-us/pricing/details/artifact-signing/)
+
+The local signing script supports Microsoft’s service through Jsign. Install Java, an approved Jsign release and Azure CLI, then sign in using the identity with the signer role. Verify the Jsign download against its upstream release digest. An ignored `signing.env` alongside `Cargo.toml` can hold the following configuration. Replace the endpoint with the region assigned to the account. [Jsign releases](https://github.com/ebourg/jsign/releases) · [Microsoft signing integrations and endpoints](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-signing-integrations)
+
+```text
+PINGTABLE_SIGN_ENDPOINT=eus.codesigning.azure.net
+PINGTABLE_SIGN_ACCOUNT=your-account-name
+PINGTABLE_SIGN_PROFILE=your-public-trust-profile
+JSIGN_JAR=/path/to/jsign.jar
 ```
 
-On Windows itself: `Get-AuthenticodeSignature .\pingtable.exe` should say
-`Valid` and name the publisher.
+On a configured build machine, `scripts/package-windows.sh` builds the executables, runs `scripts/sign-windows.sh` and packages the signed files. The script requests a timestamp for both executables. Keep access tokens and credentials out of the repository. Microsoft’s redistributable loader ships with its vendor license and its original bytes. [Signing script](../scripts/sign-windows.sh)
 
-`WebView2Loader.dll` is Microsoft's file and is left as it is.
+Before enabling signing in the tag workflow, configure the protected signing identity, pass the verified build artifacts to the signer, and package the signed outputs before generating any checksums or provenance. Update the Windows gate to require `Get-AuthenticodeSignature` status `Valid`, the expected publisher, a timestamp, and matching wording in the release notes. Confirm the result on a native Windows runner. The current workflow requires `NotSigned` for the Pingtable executables.
 
-## What signing does and does not do
+## SignPath Foundation for open source
 
-- Windows shows the publisher's name, and IT can allow the publisher. The
-  service issues short-lived certificates that change every few days, so an
-  allow rule should name the publisher, not one certificate.
-- The SmartScreen warning does not disappear on the first day. Reputation
-  builds with downloads, per publisher, and carries over to later releases
-  signed by the same publisher
-  ([Microsoft on SmartScreen](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)).
-- The service adds a trusted timestamp, so a signature stays valid after its
-  certificate expires.
+SignPath Foundation offers eligible open-source projects a signing service after application and review. If accepted with the Foundation certificate, Windows identifies **SignPath Foundation** as the publisher. Apply with the public repository, release history and the project’s code-signing policy. Review eligibility of the bundled Microsoft WebView2 loader with the Foundation. Restrict a signing request to the project-built executables and distribute the upstream DLL unchanged. [Eligibility and conditions](https://signpath.org/terms) · [Application](https://signpath.org/apply)
 
-## Not tried yet
+The integration should use a reviewed GitHub Actions build artifact, the project’s approved artifact configuration and its designated release approvers. Package the returned signed executables and update the publisher name in the package readmes, release notes and Windows verification gate to match the issuing certificate. The existing Azure signing script targets Microsoft Artifact Signing. A SignPath release needs its own approved signing request in the workflow. [SignPath’s GitHub integration](https://docs.signpath.io/trusted-build-systems/github)
 
-The script has been run against stand-in tools to check what it asks jsign
-to do, and its checks have been run on unsigned programs. It has not signed
-with the real service, which needs the account above.
+## Check Authenticode on Windows
+
+```powershell
+Get-AuthenticodeSignature .\pingtable.exe, .\pingtable-cli.exe |
+    Select-Object Path, Status, SignerCertificate, TimeStamperCertificate
+```
+
+A valid signature allows Windows and management tools to identify the publisher. SmartScreen also considers reputation and may prompt on newly released files. [Microsoft on SmartScreen reputation](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)

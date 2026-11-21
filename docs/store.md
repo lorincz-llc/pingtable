@@ -1,15 +1,13 @@
 # The Microsoft Store build
 
-The Store build is the same two programs in an MSIX package. Microsoft signs
-it, installs it, and updates it, so it never shows an "unknown publisher"
-warning. It is the paid edition: the zip on GitHub stays free.
+The Microsoft Store package contains the same free app and command-line program as
+the native-window ZIP. This page describes how to prepare a Store submission.
 
 ## Once: Partner Center
 
 1. **Register the company** in
-   [Partner Center](https://partner.microsoft.com/dashboard). Company
-   registration has been free since May 2026; the company still has to pass
-   business verification.
+   [Partner Center](https://partner.microsoft.com/dashboard). Complete the
+   business verification requested for the company account.
 2. **Reserve the name** "pingtable" by starting a new app.
 3. **Copy the identity values** from the app's Product identity page into a
    file named `store.env` beside `Cargo.toml` (ignored by git):
@@ -23,28 +21,30 @@ warning. It is the paid edition: the zip on GitHub stays free.
 ## Every release
 
 ```bash
-scripts/package-msix.sh
+scripts/package-msix.sh --no-build
 ```
 
-builds the programs and packs `dist/pingtable-VERSION-x64.msix`. It needs
-`makeappx.exe` from the Windows SDK, so run it on a Windows machine (from WSL
-or Git Bash). Upload the file in Partner Center as a new submission. Do not
-sign it yourself: the Store replaces the signature with Microsoft's.
+packs `dist/pingtable-VERSION-x64.msix`. Cross-build with
+`scripts/build-windows.sh` on Linux first. Copy the entire `dist/windows`
+directory to the same source revision on native Windows. It includes the
+loader, the matching toolchain notices and their checksum manifest. Run
+the packer in Git Bash with the Windows SDK, then upload the unsigned MSIX
+in Partner Center for Store signing.
 
 Without `store.env` the script packs a preview with a made-up identity. That
 proves the package builds; it cannot be submitted.
 
 ## In the submission
 
-- **Price:** set the base price there. The plan is $14.99, paid once.
-  Microsoft keeps 15% of app sales.
+- Set the listing price to **Free**.
 - **`runFullTrust`:** the package asks for this restricted capability, as
   every packaged desktop program does. Partner Center asks why. The answer:
   pingtable is a classic Win32 program that sends ICMP pings through the
   Windows IP Helper API and shows its interface in a WebView2 window.
 - **Privacy:** Partner Center is likely to ask for a privacy policy link,
   because the package can use the network. The honest text is short:
-  pingtable collects nothing and contacts only the hosts you list.
+  settings and hosts are stored locally. Probes contact the selected hosts
+  and use the system’s address and name resolution.
 - **Description and pictures:** the README and the site have the words;
   screenshots have to be taken from the app.
 
@@ -60,8 +60,6 @@ beside the program is not possible inside a package.
 
 ## Not tried yet
 
-The preview package builds and passes the packing tool's checks. It has not
-been installed, because installing an unsigned package needs developer mode
-or a trusted certificate, and it has not been through Store certification.
-Try the first real package on your own machine through a private Store
-listing before making it public.
+The 0.4.0 package has not been installed or submitted for Store certification.
+Verify installation, launch and the command-line alias on native Windows
+through a private listing before a public submission.

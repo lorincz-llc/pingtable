@@ -1,25 +1,24 @@
 # pingtable
 
-> pingtable pings many hosts, checks whether TCP ports are listening, and
-> traces routes. It is a small free Windows program (Rust, Apache-2.0) with a
-> window app, a command-line program, a local HTTP API and an MCP server, so a
-> person, a script or an AI agent can all use the same checks.
+> Pingtable is a free host monitor with a live table, command line, local
+> HTTP API and MCP server. It monitors ICMP replies and named TCP services
+> such as example.com:443, measures latency and traces routes. Its source
+> is available under Apache 2.0.
 
 Checks are sent from the computer pingtable runs on. Use it only on hosts the
 user owns or is allowed to test.
 
 ## For agents
 
-- [Using pingtable from an AI agent](https://github.com/lorincz-llc/pingtable/blob/main/docs/ai-agents.md): the MCP server (`pingtable-cli mcp`), its six tools with arguments and example results, which tool to use when, limits.
+- [Using pingtable from an AI agent](https://github.com/lorincz-llc/pingtable/blob/main/docs/ai-agents.md): the MCP server (`pingtable-cli mcp`), its tools with arguments and example results, which tool to use when, limits.
 - [The local HTTP API](https://github.com/lorincz-llc/pingtable/blob/main/docs/api.md): every call with request and reply examples; `pingtable-cli api` prints the address and token.
 
 ## Quick reference
 
-- MCP server command: `pingtable-cli mcp` (standard input and output; tools only).
-- Tools: `ping`, `check_ports`, `trace_route`, `network_info`, `table_status`, `table_add_hosts`.
-- Command line with JSON: `pingtable-cli once --format json HOST...`, `pingtable-cli ports --format json HOST [PORT...]`. Exit status 0 when everything answered, 1 when not, 2 for a bad command.
-- Port check results: `open` (listening), `closed` (host refused), `no_answer` (firewall, or host off).
-- A ping with no answer does not prove a host is off; many hosts drop pings. Check a port it should serve.
+- MCP server command: `pingtable-cli mcp` (standard input and output; tools only). Add `--allow-add` to offer `table_add_hosts`.
+- Tools: `ping`, `trace_route`, `network_info`, `table_status`; `table_add_hosts` only with `--allow-add`.
+- `ping` takes plain names and addresses and at most one range or block (256 hosts). Every call ends within 30 seconds.
+- For JSON from the command line, run `pingtable-cli once --format json HOST...`. Use `example.com:443` to check a named TCP service once. Exit status is 0 when every host answers, 1 for a failed check and 2 for invalid input.
 
 ## More
 

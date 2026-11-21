@@ -46,7 +46,7 @@ BEGIN
     BEGIN
       VALUE "FileDescription", "pingtable"
       VALUE "ProductName", "pingtable"
-      VALUE "Comments", "pingtable@lorincz.llc"
+      VALUE "Comments", "hello@pingtable.net"
       VALUE "CompanyName", "Lorincz LLC"
       VALUE "LegalCopyright", "Copyright 2026 Lorincz LLC. Apache License 2.0."
       VALUE "FileVersion", "{version}"

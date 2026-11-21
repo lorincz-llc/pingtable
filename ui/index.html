@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#07090b">
 <title>pingtable</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
@@ -36,7 +36,7 @@
 
   <div class="run" id="run-state" title="">
     <span class="run-light" aria-hidden="true"></span>
-    <span class="run-text" id="run-text">STOPPED</span>
+    <span class="run-text" id="run-text">Stopped</span>
     <span class="run-sub" id="run-sub"></span>
   </div>
 
@@ -45,9 +45,8 @@
       <span class="visually-hidden">Filter hosts</span>
       <input id="search" type="search" placeholder="Filter  /" autocomplete="off" spellcheck="false">
     </label>
-    <button class="btn btn-primary" id="btn-toggle" title="Start or stop the regular pinging (S)">START</button>
-    <button class="btn" id="btn-add" title="Add hosts (A)">+ ADD</button>
-    <button class="btn" id="btn-ports" title="Port check: is anything listening on a host's TCP ports? (O)">PORTS</button>
+    <button class="btn btn-primary" id="btn-toggle" title="Start or stop the regular pinging (S)">Start</button>
+    <button class="btn" id="btn-add" title="Add hosts (A)">+ Add</button>
     <button class="btn btn-icon" id="btn-settings" title="Settings (,)" aria-label="Settings">
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="9" y="2" width="3" height="4" fill="currentColor"/><rect x="4" y="6" width="3" height="4" fill="currentColor"/><rect x="10" y="10" width="3" height="4" fill="currentColor"/></svg>
     </button>
@@ -55,7 +54,7 @@
       <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"/><rect x="8" y="2" width="6" height="12" fill="currentColor"/></svg>
     </button>
     <div class="menu-wrap">
-      <button class="btn btn-icon" id="btn-menu" aria-haspopup="true" aria-expanded="false" title="More">
+      <button class="btn btn-icon" id="btn-menu" aria-expanded="false" aria-controls="menu" title="More" aria-label="More">
         <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="2" fill="none"/></svg>
       </button>
       <div class="menu" id="menu" hidden>
@@ -63,17 +62,18 @@
         <div class="menu-cols" id="menu-cols"></div>
         <div class="menu-head">View</div>
         <button class="menu-item" id="mi-group"><span class="check"></span>Group rows</button>
+        <button class="menu-item" id="mi-density" title="Rows of 32 pixels instead of 26"><span class="check"></span>Roomy rows</button>
         <button class="menu-item" id="mi-widths">Reset columns</button>
         <button class="menu-item" id="mi-sound"><span class="check"></span>Sound on down / up</button>
         <div class="menu-head">Hosts</div>
         <button class="menu-item" id="mi-add">Add hosts…<span class="hint">A</span></button>
         <button class="menu-item" id="mi-import">Import hosts from a file…</button>
-        <button class="menu-item" id="mi-ports">Check ports on a host…<span class="hint">O</span></button>
         <button class="menu-item" id="mi-list">Edit the host list…<span class="hint">H</span></button>
         <button class="menu-item" id="mi-settings">Settings…<span class="hint">,</span></button>
-        <div class="menu-head">Export</div>
-        <a class="menu-item" id="mi-csv" download>Table as CSV</a>
-        <a class="menu-item" id="mi-json" download>Table as JSON</a>
+        <div class="menu-head">Copy and export</div>
+        <div class="menu-fmt" id="mi-copy" role="group" aria-labelledby="mi-copy-l"><span class="menu-fmt-l" id="mi-copy-l">Copy table as</span><button class="menu-fmt-b" data-f="text">Text</button><button class="menu-fmt-b" data-f="md">Markdown</button><button class="menu-fmt-b" data-f="json">JSON</button><button class="menu-fmt-b" data-f="tsv">TSV</button></div>
+        <button type="button" class="menu-item" id="mi-csv">Save as a CSV file</button>
+        <button type="button" class="menu-item" id="mi-json">Save as a JSON file</button>
         <div class="menu-head">Data</div>
         <button class="menu-item" id="mi-measure">Measure for a set time…</button>
         <button class="menu-item" id="mi-now">Ping every host once, now</button>
@@ -88,7 +88,12 @@
 </header>
 
 <div class="banner" id="banner" hidden></div>
-
+<div class="banner banner-note" id="note-banner" hidden role="alert">
+  <ul class="note-list" id="note-list"></ul>
+  <button type="button" class="banner-x" id="note-close" title="Dismiss" aria-label="Dismiss">
+    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+  </button>
+</div>
 <main class="stage" id="stage">
   <div class="grid" id="grid" tabindex="0" role="grid" aria-label="Hosts">
     <div class="thead" id="thead" role="row"></div>
@@ -96,20 +101,20 @@
   </div>
 
   <section class="empty" id="empty" hidden>
-    <h2>NO HOSTS YET</h2>
+    <h2>No hosts yet</h2>
     <p>Type the machines you want to watch, one per line or separated by spaces. Put a port after a host, like <b>:443</b>, to check that something is listening there.</p>
     <pre>192.168.1.1
 nas.lan every=5s
 example.com:443
 10.0.0.0/24</pre>
     <div class="empty-actions">
-      <button class="btn btn-primary" id="btn-empty-add">ADD HOSTS</button>
-      <button class="btn" id="btn-empty-import" title="Add hosts from a CSV or text file">IMPORT A FILE…</button>
-      <button class="btn" id="btn-empty-example">USE THE EXAMPLE HOSTS</button>
+      <button class="btn btn-primary" id="btn-empty-add">Add hosts</button>
+      <button class="btn" id="btn-empty-import" title="Add hosts from a CSV or text file">Import a file…</button>
+      <button class="btn" id="btn-empty-example">Use the example hosts</button>
     </div>
   </section>
 
-  <aside class="detail" id="detail" hidden aria-label="Host detail">
+  <aside class="detail" id="detail" hidden aria-label="Host detail" data-copy="detail">
     <div class="detail-grip" id="detail-grip" title="Drag to resize"></div>
     <header class="detail-head">
       <span class="sq" id="d-sq"></span>
@@ -147,22 +152,22 @@ example.com:443
   <span class="foot-item" id="foot-ver"></span>
 </footer>
 
-<div class="menu ctx" id="ctx" hidden role="menu"></div>
+<div class="menu ctx" id="ctx" hidden role="menu" tabindex="-1" aria-labelledby="ctx-title"></div>
 
 <div class="toasts" id="toasts" aria-live="assertive"></div>
 <input type="file" id="f-import-any" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
 
-<dialog class="dlg" id="dlg-hosts">
+<dialog class="dlg" id="dlg-hosts" aria-labelledby="hosts-title">
   <form method="dialog" class="dlg-form" id="hosts-form">
-    <header class="dlg-head"><h2>HOST LIST</h2></header>
+    <header class="dlg-head"><h2 id="hosts-title">Host list</h2></header>
     <div class="dlg-body">
       <div class="hosts-cols">
         <div class="hosts-edit">
           <textarea id="f-hosts" spellcheck="false" autocomplete="off" wrap="off" aria-label="Host list"></textarea>
           <div class="parse-row">
             <div class="parse" id="parse-line">&nbsp;</div>
-            <button type="button" class="btn btn-small" id="btn-import" title="Add hosts from a CSV or text file">IMPORT A FILE…</button>
-            <button type="button" class="btn btn-small" id="btn-defaults" title="Put pingtable's example hosts back in the editor">RESTORE DEFAULT HOSTS</button>
+            <button type="button" class="btn btn-small" id="btn-import" title="Add hosts from a CSV or text file">Import a file…</button>
+            <button type="button" class="btn btn-small" id="btn-defaults" title="Put pingtable's example hosts back in the editor">Restore default hosts</button>
             <input type="file" id="f-import" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
           </div>
           <ul class="parse-warn" id="parse-warn"></ul>
@@ -200,18 +205,19 @@ example.com:443
       </div>
     </div>
     <footer class="dlg-foot">
-      <span class="dlg-msg" id="dlg-msg"></span>
-      <button type="button" class="btn" id="dlg-cancel">CANCEL</button>
-      <button type="button" class="btn" id="dlg-reset" title="Apply and clear every counter">APPLY AND RESET</button>
-      <button type="button" class="btn btn-primary" id="dlg-apply" title="Apply; hosts still in the list keep their history">APPLY</button>
+      <span class="dlg-msg" id="dlg-msg" role="status"></span>
+      <button type="button" class="btn" id="dlg-reload" hidden title="Put the host list as it is now in the editor. What you typed is copied to the clipboard first, and Ctrl+Z brings it back.">Load it again</button>
+      <button type="button" class="btn" id="dlg-cancel">Cancel</button>
+      <button type="button" class="btn" id="dlg-reset" title="Apply and clear every counter">Apply and reset</button>
+      <button type="button" class="btn btn-primary" id="dlg-apply" title="Apply; hosts still in the list keep their history">Apply</button>
     </footer>
   </form>
 </dialog>
 
-<dialog class="dlg dlg-mid" id="dlg-settings">
+<dialog class="dlg dlg-mid" id="dlg-settings" aria-labelledby="settings-title">
   <form method="dialog" class="dlg-form" id="settings-form">
     <header class="dlg-head">
-      <h2>SETTINGS</h2>
+      <h2 id="settings-title">Settings</h2>
       <div class="tabs" role="tablist">
         <button type="button" class="tab is-on" data-tab="pinging" role="tab">Pinging</button>
         <button type="button" class="tab" data-tab="network" role="tab">Network</button>
@@ -254,23 +260,24 @@ example.com:443
           <label class="fld"><span>A host is down after</span><div class="unit"><input type="number" id="f-failn" min="1" max="1000"><i>failed pings in a row</i></div></label>
           <label class="fld"><span>It is up again after</span><div class="unit"><input type="number" id="f-upn" min="1" max="1000"><i>good pings in a row</i></div></label>
         </div>
-        <label class="fld fld-wide"><span>Run this command when a host goes down</span><input type="text" id="f-cmddown" spellcheck="false" placeholder="for example: msg * %HostName% is down"></label>
-        <label class="fld fld-wide"><span>Run this command when it comes back</span><input type="text" id="f-cmdup" spellcheck="false"></label>
-        <p class="hint">Variables: %HostName% %IPAddress% %Description% %Group% %Status% %SucceedCount% %FailedCount% %ConsecutiveFailedCount% %LastPingTime%. The same values are passed as PINGTABLE_ environment variables.</p>
+        <label class="fld fld-wide"><span>Run this command when a host goes down<b class="lock-note"> · Locked in the settings file</b></span><input type="text" id="f-cmddown" spellcheck="false" placeholder="for example: msg * %HostName% is down"></label>
+        <label class="fld fld-wide"><span>Run this command when it comes back<b class="lock-note"> · Locked in the settings file</b></span><input type="text" id="f-cmdup" spellcheck="false"></label>
+        <p class="hint">Variables: %HostName% %IPAddress% %Description% %Group% %Status% %SucceedCount% %FailedCount% %ConsecutiveFailedCount% %LastPingTime%. Values keep plain ASCII letters, digits, spaces and <b>. _ : @ / + , = -</b>; anything else becomes <b>_</b>. In %Description% and %Group% every space becomes <b>_</b> too, quotes or no quotes, and <b>-</b>, <b>/</b> and <b>@</b> are kept only straight after a letter or digit.</p>
+        <p class="hint">A script can read the exact values from PINGTABLE_ environment variables. At most 4 commands run at once; one that runs for more than 60 seconds is stopped, with the programs it started.</p>
         <p class="hint" id="cfg-path"></p>
       </section>
     </div>
     <footer class="dlg-foot">
       <span class="dlg-msg" id="settings-msg"></span>
-      <button type="button" class="btn" id="settings-cancel">CANCEL</button>
-      <button type="button" class="btn btn-primary" id="settings-apply">APPLY</button>
+      <button type="button" class="btn" id="settings-cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="settings-apply">Apply</button>
     </footer>
   </form>
 </dialog>
 
-<dialog class="dlg dlg-add" id="dlg-add">
+<dialog class="dlg dlg-add" id="dlg-add" aria-labelledby="add-title">
   <form method="dialog" class="dlg-form">
-    <header class="dlg-head"><h2>ADD HOSTS</h2></header>
+    <header class="dlg-head"><h2 id="add-title">Add hosts</h2></header>
     <div class="dlg-body">
       <textarea id="add-text" rows="3" spellcheck="false" autocomplete="off" wrap="off" aria-label="Hosts to add" placeholder="nas.lan  NAS in the closet"></textarea>
       <p class="hint">A host name or address, then an optional description. One per line for several. Enter adds; Shift+Enter starts a new line.</p>
@@ -279,7 +286,7 @@ example.com:443
         <div class="chips" id="add-chips"></div>
         <input type="text" class="chip-input" id="add-ports" spellcheck="false" autocomplete="off" placeholder="other ports" aria-label="Other TCP ports" title="Other TCP ports, for example 8080 or 9000-9005">
       </div>
-      <p class="hint">PING asks whether the host is there. A port opens a TCP connection to it and closes it again, which shows whether something is listening on that port. Each choice gets its own row.</p>
+      <p class="hint">Ping asks whether the host is there. A port opens a TCP connection to it and closes it again, which shows whether something is listening on that port. Each choice gets its own row.</p>
       <div class="fields">
         <label class="fld"><span>Put them in</span><div class="unit"><select id="add-group"></select></div></label>
         <label class="fld" id="add-new-wrap" hidden><span>Name of the new group</span><div class="unit"><input type="text" id="add-new" spellcheck="false" autocomplete="off"></div></label>
@@ -287,28 +294,29 @@ example.com:443
     </div>
     <footer class="dlg-foot">
       <span class="dlg-msg" id="add-msg"></span>
-      <button type="button" class="btn" id="add-import" title="Add many hosts from a CSV or text file. You can also drop a file anywhere on the window.">IMPORT A FILE…</button>
-      <button type="button" class="btn" id="add-close">CLOSE</button>
-      <button type="button" class="btn btn-primary" id="add-go">ADD</button>
+      <button type="button" class="btn" id="add-import" title="Add many hosts from a CSV or text file. You can also drop a file anywhere on the window.">Import a file…</button>
+      <button type="button" class="btn" id="add-close">Close</button>
+      <button type="button" class="btn btn-primary" id="add-go">Add</button>
     </footer>
   </form>
 </dialog>
 
-<dialog class="dlg dlg-small" id="dlg-keys">
+<dialog class="dlg dlg-small" id="dlg-keys" aria-labelledby="keys-title">
   <form method="dialog" class="dlg-form">
-    <header class="dlg-head"><h2>KEYBOARD</h2></header>
+    <header class="dlg-head"><h2 id="keys-title">Keyboard shortcuts</h2></header>
     <div class="dlg-body keys">
       <kbd>/</kbd><span>Filter hosts</span>
       <kbd>&uarr;</kbd><kbd class="k2">&darr;</kbd><span>Move through the table</span>
       <kbd>Enter</kbd><span>Open or close the detail panel</span>
       <kbd>M</kbd><span>Mute or unmute the selected hosts</span>
       <kbd>Ctrl</kbd><kbd class="k2">click</kbd><span>Select several hosts (Shift-click for a range)</span>
+      <kbd>Ctrl</kbd><kbd class="k2">A</kbd><span>Select every host shown</span>
       <kbd>S</kbd><span>Start or stop pinging</span>
       <kbd>P</kbd><span>Ping every host once, now</span>
-      <kbd>Ctrl</kbd><kbd class="k2">C</kbd><span>Copy a summary of the selected hosts</span>
-      <kbd>Menu</kbd><span>Options for the selection (or right-click it)</span>
+      <kbd>Ctrl</kbd><kbd class="k2">C</kbd><span>Copy the selected hosts as a text table, with the columns you chose</span>
+      <kbd>Ctrl</kbd><kbd class="k2">Shift C</kbd><span>Copy them as a Markdown table</span>
+      <kbd>Menu</kbd><span>Options for the selection, and copy as JSON or TSV (or right-click it)</span>
       <kbd>A</kbd><span>Add hosts (or paste them with Ctrl+V)</span>
-      <kbd>O</kbd><span>Port check: which TCP ports answer on a host</span>
       <kbd>Del</kbd><span>Remove the selected hosts from the list</span>
       <kbd>H</kbd><span>Edit the whole host list</span>
       <kbd>,</kbd><span>Settings</span>
@@ -316,13 +324,13 @@ example.com:443
       <kbd>T</kbd><span>Dark or light</span>
       <kbd>Esc</kbd><span>Close what is open</span>
     </div>
-    <footer class="dlg-foot"><button class="btn btn-primary">CLOSE</button></footer>
+    <footer class="dlg-foot"><button class="btn btn-primary">Close</button></footer>
   </form>
 </dialog>
 
-<dialog class="dlg dlg-mid" id="dlg-measure">
+<dialog class="dlg dlg-mid" id="dlg-measure" aria-labelledby="measure-title">
   <form method="dialog" class="dlg-form">
-    <header class="dlg-head"><h2>MEASURE</h2></header>
+    <header class="dlg-head"><h2 id="measure-title">Measure</h2></header>
     <div class="dlg-body">
       <div id="measure-setup">
         <p id="measure-who"></p>
@@ -338,63 +346,40 @@ example.com:443
         </div>
         <p class="hint">The chosen hosts are pinged at this rate for this long, whether or not regular pinging is on. Everything else carries on as it was. You can close this window; the measurement keeps running and the result waits here.</p>
       </div>
-      <div id="measure-run" hidden>
+      <div id="measure-run" hidden data-copy="measure">
         <div class="measure-clock"><span id="m-clock">00:00</span><span id="m-clock-note"></span></div>
         <div class="mtable m-measure" id="m-table"></div>
       </div>
     </div>
     <footer class="dlg-foot">
       <span class="dlg-msg" id="m-msg"></span>
-      <button type="button" class="btn" id="m-close">CLOSE</button>
-      <button type="button" class="btn" id="m-copy" hidden>COPY REPORT</button>
-      <button type="button" class="btn" id="m-stop" hidden>STOP</button>
-      <button type="button" class="btn btn-primary" id="m-start">START</button>
+      <button type="button" class="btn" id="m-close">Close</button>
+      <button type="button" class="btn" id="m-copy" hidden aria-haspopup="menu" aria-expanded="false">Copy as…</button>
+      <button type="button" class="btn" id="m-stop" hidden>Stop</button>
+      <button type="button" class="btn btn-primary" id="m-start">Start</button>
     </footer>
   </form>
 </dialog>
 
-<dialog class="dlg dlg-mid" id="dlg-trace">
+<dialog class="dlg dlg-mid" id="dlg-trace" aria-labelledby="trace-title">
   <form method="dialog" class="dlg-form">
-    <header class="dlg-head"><h2 id="trace-title">ROUTE</h2></header>
-    <div class="dlg-body">
+    <header class="dlg-head"><h2 id="trace-title">Route</h2></header>
+    <div class="dlg-body" data-copy="trace">
       <p class="hint" id="trace-note"></p>
       <div class="mtable m-trace" id="trace-table"></div>
     </div>
     <footer class="dlg-foot">
       <span class="dlg-msg" id="trace-msg"></span>
-      <button type="button" class="btn" id="trace-again">AGAIN</button>
-      <button type="button" class="btn" id="trace-copy">COPY</button>
-      <button class="btn btn-primary">CLOSE</button>
+      <button type="button" class="btn" id="trace-again">Again</button>
+      <button type="button" class="btn" id="trace-copy" aria-haspopup="menu" aria-expanded="false">Copy as…</button>
+      <button class="btn btn-primary">Close</button>
     </footer>
   </form>
 </dialog>
 
-<dialog class="dlg dlg-ports" id="dlg-ports">
+<dialog class="dlg dlg-small" id="dlg-about" aria-labelledby="about-title">
   <form method="dialog" class="dlg-form">
-    <header class="dlg-head"><h2>PORT CHECK</h2></header>
-    <div class="dlg-body">
-      <label class="fld fld-wide"><span>Host</span><input type="text" id="pc-host" spellcheck="false" autocomplete="off" placeholder="example.com or 192.168.1.10"></label>
-      <div class="pick">
-        <span class="pick-l">Ports</span>
-        <div class="chips" id="pc-chips"></div>
-        <input type="text" class="chip-input" id="pc-ports" spellcheck="false" autocomplete="off" placeholder="other ports" aria-label="Other TCP ports" title="Other TCP ports, for example 8080 or 9000-9005">
-      </div>
-      <p class="hint" id="pc-note"></p>
-      <div class="mtable m-ports" id="pc-table"></div>
-    </div>
-    <footer class="dlg-foot">
-      <span class="dlg-msg" id="pc-msg"></span>
-      <button type="button" class="btn" id="pc-close">CLOSE</button>
-      <button type="button" class="btn" id="pc-copy" hidden>COPY</button>
-      <button type="button" class="btn" id="pc-watch" hidden title="Add a row for each of these ports, so they are checked all the time">WATCH IN THE TABLE</button>
-      <button type="button" class="btn btn-primary" id="pc-go">CHECK</button>
-    </footer>
-  </form>
-</dialog>
-
-<dialog class="dlg dlg-small" id="dlg-about">
-  <form method="dialog" class="dlg-form">
-    <header class="dlg-head"><h2>ABOUT</h2></header>
+    <header class="dlg-head"><h2 id="about-title">About</h2></header>
     <div class="dlg-body about">
       <div class="about-mark"><span class="brand-mark" aria-hidden="true"></span><h3>PINGTABLE</h3></div>
       <p class="about-version" id="about-version"></p>
@@ -403,23 +388,25 @@ example.com:443
       <p class="hint" id="about-libs"></p>
       <p class="hint about-disclaimer">pingtable is provided as is, without warranty of any kind, and you use it at your own risk: its authors accept no liability for any damage or loss. Use it only on networks and hosts you are allowed to test; you are responsible for the traffic it sends and the commands it runs. It collects nothing and reports nothing to anyone. <a href="https://github.com/lorincz-llc/pingtable/blob/main/DISCLAIMER.md" target="_blank" rel="noopener noreferrer">Full disclaimer</a></p>
     </div>
-    <footer class="dlg-foot"><button class="btn btn-primary">CLOSE</button></footer>
+    <footer class="dlg-foot">
+      <button class="btn btn-primary">Close</button>
+    </footer>
   </form>
 </dialog>
 
-<dialog class="dlg dlg-small" id="dlg-confirm">
+<dialog class="dlg dlg-small" id="dlg-confirm" aria-labelledby="confirm-title">
   <form method="dialog" class="dlg-form">
     <header class="dlg-head"><h2 id="confirm-title"></h2></header>
     <div class="dlg-body"><p id="confirm-text"></p></div>
     <footer class="dlg-foot">
-      <button class="btn" value="no">CANCEL</button>
+      <button class="btn" value="no">Cancel</button>
       <button class="btn btn-danger" value="yes" id="confirm-yes"></button>
     </footer>
   </form>
 </dialog>
 
 <section class="gate" id="gate" hidden>
-  <h2>OPEN THE LINK FROM PINGTABLE</h2>
+  <h2>Open the link from pingtable</h2>
   <p>This page needs the access link pingtable prints when it starts. It looks like</p>
   <pre>http://127.0.0.1:7464/?t=…</pre>
   <p>Open that link once and this browser will remember it.</p>

@@ -1,36 +1,21 @@
 # Security
 
-## Reporting a problem
+## Report a suspected vulnerability privately
 
-Email **pingtable@lorincz.llc**. Please do not open a public issue for a
-security problem.
+Email [support@pingtable.net](mailto:support@pingtable.net). Include the pingtable version, operating system, affected component, impact and a short description of what you observed. Use documentation addresses or sanitized examples. Keep credentials, API tokens, personal information, internal host lists, configuration files and packet captures out of the initial report and public issues.
 
-Say which version you have (the About box, or `pingtable-cli --version`), what
-you did and what happened. A short way to reproduce it helps most.
+The project reviews reports for the current release. A confirmed issue may result in a patch or advisory. No response deadline or bounty is promised.
 
-Fixes go into the next release; only the latest release is maintained. There
-is no bug bounty and no promised response time (see
-[DISCLAIMER.md](DISCLAIMER.md)).
+## Local access and commands
 
-## What pingtable does and does not do
+The HTTP interface listens on loopback. The server checks the Host header and any supplied Origin. State and control requests require the bearer token from the configuration file. The local discovery handshake uses a nonce and keyed proof so pingtable's clients can identify a running instance before presenting the token.
 
-- It talks only to the hosts in your list and to the system's name resolver.
-  It has no telemetry, no update check and no account.
-- Its interface is an HTTP server on the loopback address only. Every API call
-  needs the access token kept in the config file. Requests whose `Host` or
-  `Origin` is not this machine are refused.
-- The settings can hold commands that pingtable runs when a host goes down or
-  comes back. Anyone who can read the config file, or who has the token, can
-  therefore make pingtable run a command as you. Treat `pingtable.json` like a
-  script: keep it where only you can write.
-- Values substituted into alert commands (`%HostName%` and the rest) are
-  reduced to plain characters first, so text from an imported file cannot add
-  commands of its own.
-- Pinging uses the unprivileged Windows ICMP API. pingtable needs no
-  administrator rights and should not be run with them.
+Treat the configuration, API token and browser launch URL as credentials. Someone with access to your account or token may be able to read network information, change monitored destinations or configure an alert command. Protect both the program directory and configuration with your account's permissions. Back up your settings securely. If the token was exposed, stop the app, set the `token` field in the configuration to an empty string and restart. The app generates and saves a fresh token. Update any clients that stored the old one.
 
-## Release files
+Alert commands run as the user who started pingtable. Keep them disabled until needed. To manage commands exclusively through the local file, set `"commands_locked": true` in `pingtable.json`. Limit write access to that file and to any script it invokes. Treat exact values passed through `PINGTABLE_` environment variables as untrusted data in your script. Use ordinary account privileges.
 
-The Windows programs are not code-signed yet. Each release lists the SHA-256
-of its zip; compare it before running, or build from source
-([README](README.md#building-for-windows-from-linux)).
+The agent interface offers a read-only view of the table by default. An explicit `--allow-add` enables limited additions. One-shot diagnostic tools can generate network traffic. Give agent tools only to users you trust with the selected destinations. On shared WSL systems, use `--no-open` to avoid passing the browser launch URL to Windows through a process argument. [Agent guide](docs/ai-agents.md)
+
+## Releases
+
+Download packages from the project's GitHub releases. Compare the ZIP's SHA-256 with the digest in that release. For a build described as signed, inspect both executable signatures and their publisher in Windows. For a suspected altered package, include its filename, release version and computed digest in the private report. [Releases](https://github.com/lorincz-llc/pingtable/releases) · [Build and signature verification](docs/signing.md)

@@ -1,4 +1,4 @@
-// pingtable.net: the light/dark switch, and a little life in the sample table.
+// pingtable.net: the light/dark switch, and the demo's frame.
 // Loaded in the head so the chosen look is set before the page is drawn.
 
 (function () {
@@ -8,36 +8,37 @@
   // Light is the default; dark only when chosen here before.
   root.dataset.theme = saved === 'dark' ? 'dark' : 'light';
 
-  document.addEventListener('DOMContentLoaded', function () {
-    var button = document.getElementById('theme');
-    if (button) {
-      button.addEventListener('click', function () {
-        var next = root.dataset.theme === 'dark' ? 'light' : 'dark';
-        root.dataset.theme = next;
-        try { localStorage.setItem('pingtable.site.theme', next); } catch (e) {}
-      });
-    }
+  // A page whose Content-Security-Policy does not allow the frame shows a
+  // link to the demo's own page instead of an empty box.
+  document.addEventListener('securitypolicyviolation', function (e) {
+    var directive = e.effectiveDirective || e.violatedDirective || '';
+    if (!/^(frame|child)-src/.test(directive)) return;
+    var box = document.getElementById('demo-window');
+    if (box) box.classList.add('is-blocked');
+  });
 
-    // The sample table: nudge the "last" figures once a second and run the
-    // stopwatch, the way the app looks while it is pinging. Nothing is sent
-    // anywhere; the numbers are made up around each row's typical time.
-    if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    var cells = document.querySelectorAll('[data-base]');
-    var clock = document.getElementById('clock');
-    var started = Date.now();
-    var two = function (n) { return (n < 10 ? '0' : '') + n; };
-    setInterval(function () {
-      if (document.hidden) return;
-      cells.forEach(function (cell) {
-        var base = parseFloat(cell.dataset.base);
-        var jitter = parseFloat(cell.dataset.jitter);
-        var value = Math.max(0.01, base + (Math.random() - 0.5) * 2 * jitter);
-        cell.textContent = value < 10 ? value.toFixed(2) : value.toFixed(1);
-      });
-      if (clock) {
-        var seconds = Math.floor((Date.now() - started) / 1000);
-        clock.textContent = two(Math.floor(seconds / 60) % 60) + ':' + two(seconds % 60);
-      }
-    }, 1000);
+  // The demo runs sandboxed, in an opaque origin: it cannot read this page or its storage, so
+  // the page tells it the look. Its origin is "null", hence '*'; the look is no secret, and the
+  // demo takes only {pingtableTheme: 'light' | 'dark'} from this page.
+  function tellDemo(frame) {
+    if (!frame || !frame.contentWindow) return;
+    try { frame.contentWindow.postMessage({ pingtableTheme: root.dataset.theme === 'dark' ? 'dark' : 'light' }, '*'); } catch (e) {}
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var frame = document.getElementById('demo-frame');
+    if (frame) {
+      // Dark from its first picture on, when the page is dark; then the page's look each time it loads.
+      if (root.dataset.theme === 'dark') frame.src = (frame.getAttribute('src') || '/demo/').split('?')[0] + '?theme=dark';
+      frame.addEventListener('load', function () { tellDemo(frame); });
+    }
+    var button = document.getElementById('theme');
+    if (!button) return;
+    button.addEventListener('click', function () {
+      var next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      root.dataset.theme = next;
+      try { localStorage.setItem('pingtable.site.theme', next); } catch (e) {}
+      tellDemo(frame); // demo/replay.js follows it
+    });
   });
 })();

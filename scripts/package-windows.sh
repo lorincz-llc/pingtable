@@ -1,167 +1,171 @@
 #!/usr/bin/env bash
-# Builds the Windows programs and makes the files for a release:
-#
-#   dist/pingtable-VERSION-windows-x64.zip   a folder named "pingtable" holding the
-#                                            programs, a short readme, the license,
-#                                            the notices and the disclaimer
-#   dist/release-notes.md                    text for the release page, with the
-#                                            zip's SHA-256
-#
-# VERSION is the workspace version in Cargo.toml. The notes take their list of
-# changes from that version's section of CHANGELOG.md, so write that first.
-#
-# The programs are signed first when signing is set up (docs/signing.md), and
-# the readme and the notes say whether they are.
-#
-#   scripts/package-windows.sh             build, sign if set up, then package
-#   scripts/package-windows.sh --no-build  package what is already in dist/windows
+# Package the native-window and browser editions with their licenses and SHA-256
+# checksums in dist/. The release notes use the matching CHANGELOG.md section.
+# Use --no-build to package an existing dist/windows build, including signed files.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [ "${1:-}" != "--no-build" ]; then
-    scripts/build-windows.sh
-    if scripts/sign-windows.sh --configured; then
-        scripts/sign-windows.sh
-    else
-        echo "package-windows: signing is not set up, so these programs are unsigned (docs/signing.md)"
-    fi
-fi
+case "$#:${1:-}" in
+    0:)
+        scripts/build-windows.sh
+        if scripts/sign-windows.sh --configured; then
+            scripts/sign-windows.sh
+        else
+            echo "package-windows: producing unsigned programs (docs/signing.md)"
+        fi ;;
+    1:--no-build) ;;
+    *) echo "Usage: scripts/package-windows.sh [--no-build]" >&2; exit 2 ;;
+esac
 
-python3 -I - <<'PY'
-import hashlib, pathlib, re, sys, zipfile
+stage=$(mktemp -d dist/package-windows.XXXXXXXX)
+trap 'rm -rf "$stage"' EXIT
+python3 -I scripts/third-party.py --bundle dist/windows/third-party
+python3 -I scripts/third-party.py --browser-bundle "$stage/browser"
 
-root = pathlib.Path('.')
-version = re.search(r'^version = "([^"]+)"', (root / 'Cargo.toml').read_text(), re.M).group(1)
-name = f'pingtable-{version}-windows-x64.zip'
+python3 -I - "$stage" <<'PY'
+import hashlib
+from pathlib import Path
+import re
+import sys
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
+
+dist = Path('dist')
+build = dist / 'windows'
+stage = Path(sys.argv[1])
+version = re.search(r'^version = "([^"]+)"', Path('Cargo.toml').read_text(), re.M)[1]
 source = 'https://github.com/lorincz-llc/pingtable'
 
-# This version's changes, from the changelog.
-changelog = (root / 'CHANGELOG.md').read_text()
-section = re.search(rf'^## {re.escape(version)}\b[^\n]*\n(.*?)(?=^## |\Z)', changelog, re.M | re.S)
+section = re.search(rf'^## {re.escape(version)}\b[^\n]*\n(.*?)(?=^## |\Z)',
+                    Path('CHANGELOG.md').read_text(), re.M | re.S)
 if not section:
     sys.exit(f'package-windows: CHANGELOG.md has no section for {version}')
-changes = section.group(1).strip()
 
-readme = f'''pingtable {version} for Windows 10 and 11 (64-bit)
+# Do not attach a fresh version number to binaries left over from an older release.
+for exe in ('pingtable.exe', 'pingtable-cli.exe'):
+    version_record = f'ProductVersion\0{version}\0'.encode('utf-16-le')
+    if version_record not in (build / exe).read_bytes():
+        sys.exit(f'package-windows: {exe} does not have ProductVersion {version}. Rebuild first.')
+
+# sign-windows.sh records the signed programs' digests when it finishes.
+signed_digests = {}
+signed_note = build / 'SIGNED.txt'
+if signed_note.is_file():
+    for line in signed_note.read_text().splitlines()[1:]:
+        digest, _, path = line.partition('  ')
+        signed_digests[path.strip()] = digest.strip()
+signed = all(signed_digests.get(str(build / exe)) == hashlib.sha256((build / exe).read_bytes()).hexdigest()
+             for exe in ('pingtable.exe', 'pingtable-cli.exe'))
+signature = ('The Pingtable programs are code-signed by Lorincz LLC.' if signed else
+             'The Pingtable programs are unsigned. Windows may show an “unknown publisher” warning.')
+
+native_name = f'pingtable-{version}-windows-x64.zip'
+browser_name = f'pingtable-{version}-browser-windows-x64.zip'
+native_intro = """Native window edition
+  Double-click pingtable.exe for the desktop window. Keep WebView2Loader.dll
+  beside it. The window uses Microsoft's WebView2 Runtime. If the runtime is
+  unavailable, the app opens its table in your default browser.
+  pingtable-cli.exe runs the full browser table and command-line tools.
+  The bundled Microsoft WebView2 loader is distributed under its vendor license."""
+browser_intro = """Browser edition
+  Double-click pingtable-cli.exe to open the full table in your default browser.
+  Keep the terminal open while the table is in use. Press Ctrl+C in the terminal
+  to stop Pingtable. This ZIP contains one executable and needs no WebView2 loader."""
+
+def readme(intro):
+    return f"""Pingtable {version} for Windows 10 and 11 (64-bit)
 {source}
 
-Start it
-  Double-click pingtable.exe. Keep WebView2Loader.dll in the same folder.
-  No installer and no administrator rights are needed; the folder can sit
-  anywhere you can write.
+{intro}
 
-What is here
-  pingtable.exe        the app, in its own window
-  WebView2Loader.dll   Microsoft's loader for that window
-  pingtable-cli.exe    the same program without the window, for a terminal
-  LICENSE.txt          Apache License 2.0
-  DISCLAIMER.txt       no warranty, no liability, your responsibilities
-  NOTICE.txt, THIRD-PARTY-NOTICES.md
+Getting started
+  Pingtable is free and open source. Unpack it in a folder only your account
+  can change. You can run it without an installer or administrator rights.
 
-The command line
-  pingtable-cli.exe does the same work without a window. It suits a quick
-  answer, a script or a scheduled task. Open a terminal in this folder (in
-  File Explorer, type cmd in the address bar and press Enter), then:
-
+Commands
+  Open a terminal in the unpacked folder.
     pingtable-cli once 192.168.1.1 example.com:443
-        ping each host one time, print the result and exit
-
-    pingtable-cli ports example.com 22 80 443
-        check which TCP ports are listening on one host:
-        open, closed (refused) or no answer
-
-    pingtable-cli
-        run without the window and show the table in your browser
-
+      Ping the first address and check the named TCP service once.
+    pingtable-cli once --format json example.com:443
+      Print a JSON result. The exit status is 0 if all checks succeed.
     pingtable-cli mcp
-        serve the checks to an AI agent (Model Context Protocol)
-
+      Serve the checks to an AI agent over standard input and output.
     pingtable-cli api
-        show the address and token of the local API, with examples
-
+      Print connection details for the local API.
     pingtable-cli --help
-        every command and option
+      List all commands and options.
 
-  "once" and "ports" end with status 0 only when every host answered or
-  every port was open, so a script can act on the result. Add --format json
-  for output a program can read.
+Settings and support
+  Pingtable stores settings in %APPDATA%\\pingtable. For portable settings,
+  put a file named pingtable.json containing {{}} beside the program.
+  {signature}
+  Questions or issues: support@pingtable.net
 
-Good to know
-  @SIGNING@
-  Settings are kept in %APPDATA%\\pingtable. To keep them beside the program
-  instead, put a file named pingtable.json in this folder.
+Documents
+  LICENSE.txt                      Apache License 2.0 for Pingtable
+  NOTICE.txt                       Project attribution
+  DISCLAIMER.txt                   Warranty and liability information
+  THIRD-PARTY-NOTICES.md            Third-party licenses and attribution
+  third-party/                     Additional toolchain notices
 
-pingtable is provided "as is", without warranty of any kind, and you use it at
-your own risk. Use it only on networks and hosts you own or are authorised to
-test. Read DISCLAIMER.txt before you use it.
+Copyright 2026 Lorincz LLC. hello@pingtable.net
+"""
 
-Copyright 2026 Lorincz LLC. pingtable@lorincz.llc
-'''
+def write_zip(name, intro, programs, notices, extra):
+    files = {exe: (build / exe).read_bytes() for exe in programs}
+    texts = {
+        'README.txt': readme(intro),
+        'LICENSE.txt': Path('LICENSE').read_text(),
+        'NOTICE.txt': Path('NOTICE').read_text(),
+        'DISCLAIMER.txt': Path('DISCLAIMER.md').read_text(),
+        'THIRD-PARTY-NOTICES.md': notices.read_text(),
+    }
+    for filename, contents in texts.items():
+        files[filename] = contents.replace('\r\n', '\n').replace('\n', '\r\n').encode('utf-8')
+    extras = sorted(path for path in extra.rglob('*') if path.is_file())
+    if not extras:
+        sys.exit(f'package-windows: missing toolchain notices in {extra}')
+    for path in extras:
+        files['third-party/' + path.relative_to(extra).as_posix()] = path.read_bytes()
 
-# Signed only if the note from scripts/sign-windows.sh names these exact files.
-def is_signed():
-    note = root / 'dist' / 'windows' / 'SIGNED.txt'
-    if not note.is_file():
-        return False
-    recorded = {}
-    for line in note.read_text().splitlines()[1:]:
-        digest, _, path = line.partition('  ')
-        recorded[path.strip()] = digest.strip()
-    for program in ('pingtable.exe', 'pingtable-cli.exe'):
-        path = root / 'dist' / 'windows' / program
-        if not path.is_file() or recorded.get(f'dist/windows/{program}') != hashlib.sha256(path.read_bytes()).hexdigest():
-            return False
-    return True
+    output = stage / name
+    with ZipFile(output, 'w') as archive:
+        for filename, content in files.items():
+            # Fixed member metadata makes repacking the same inputs reproducible.
+            item = ZipInfo('pingtable/' + filename)
+            item.create_system = 3
+            item.external_attr = ((0o100755 if filename in programs else 0o100644) << 16)
+            archive.writestr(item, content, compress_type=ZIP_DEFLATED, compresslevel=9)
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    (stage / (name + '.sha256')).write_text(f'{digest}  {name}\n', encoding='ascii')
+    print(f'{name}  {output.stat().st_size} bytes  sha256 {digest}')
+    return digest
 
-signed = is_signed()
-if signed:
-    readme = readme.replace('@SIGNING@', 'The programs are signed by Lorincz LLC. Windows shows that name when you\n  run them.')
-    signing_note = 'The programs are signed by Lorincz LLC.'
-else:
-    readme = readme.replace('@SIGNING@', 'The programs are not code-signed yet, so Windows may show an "unknown\n  publisher" warning the first time you run them.')
-    signing_note = 'The programs are not code-signed yet, so Windows may show an "unknown publisher" warning the first time.'
+native = write_zip(native_name, native_intro, ['pingtable.exe', 'pingtable-cli.exe', 'WebView2Loader.dll'],
+                   Path('THIRD-PARTY-NOTICES.md'), build / 'third-party')
+browser = write_zip(browser_name, browser_intro, ['pingtable-cli.exe'],
+                    stage / 'browser' / 'THIRD-PARTY-NOTICES.md', stage / 'browser' / 'third-party')
 
-def windows_text(text):
-    """Text files in the zip use Windows line ends, so any editor shows them properly."""
-    return text.replace('\r\n', '\n').replace('\n', '\r\n').encode()
+notes = f"""## Free Windows downloads
 
-programs = ['pingtable.exe', 'WebView2Loader.dll', 'pingtable-cli.exe']
-texts = {
-    'README.txt': readme,
-    'LICENSE.txt': (root / 'LICENSE').read_text(),
-    'DISCLAIMER.txt': (root / 'DISCLAIMER.md').read_text(),
-    'NOTICE.txt': (root / 'NOTICE').read_text(),
-    'THIRD-PARTY-NOTICES.md': (root / 'THIRD-PARTY-NOTICES.md').read_text(),
-}
+Both editions run the full live table, command-line tools, MCP server and local API on 64-bit Windows 10 and 11. Unpack your ZIP in a folder only your account can change.
 
-out = root / 'dist' / name
-with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-    for program in programs:
-        path = root / 'dist' / 'windows' / program
-        if not path.is_file():
-            sys.exit(f'package-windows: {path} is missing; run scripts/build-windows.sh')
-        z.write(path, f'pingtable/{program}')
-    for filename, text in texts.items():
-        z.writestr(f'pingtable/{filename}', windows_text(text))
+- **Native window** — `{native_name}`. Double-click `pingtable.exe`. This archive includes Microsoft's WebView2 loader and the browser CLI.
+- **Browser edition** — `{browser_name}`. Double-click `pingtable-cli.exe` for the same table in your default browser. This archive includes only the CLI and accompanying notices.
 
-digest = hashlib.sha256(out.read_bytes()).hexdigest()
-(root / 'dist' / 'release-notes.md').write_text(f'''{changes}
+{signature}
 
-**Download:** `{name}` below, for Windows 10 and 11 (64-bit). Unpack it anywhere and double-click `pingtable.exe`. No installer and no administrator rights are needed.
+| ZIP | SHA-256 |
+|---|---|
+| `{native_name}` | `{native}` |
+| `{browser_name}` | `{browser}` |
 
-{signing_note}
+## Changes in {version}
 
-SHA-256 of the zip: `{digest}`
+{section[1].strip()}
 
-What it does is described in the [README]({source}#readme).
-
-pingtable is provided "as is", without warranty of any kind, and you use it at your own risk. Use it only on networks and hosts you own or are authorised to test. Full text: [DISCLAIMER.md]({source}/blob/main/DISCLAIMER.md).
-''')
-
-print(f'{out}  {out.stat().st_size} bytes  ({"signed" if signed else "unsigned"})')
-print(f'sha256  {digest}')
-with zipfile.ZipFile(out) as z:
-    for item in z.infolist():
-        print(f'  {item.file_size:>8}  {item.filename}')
-print('dist/release-notes.md written')
+See the [README]({source}#readme) for usage and the [disclaimer]({source}/blob/main/DISCLAIMER.md) for warranty and liability information.
+"""
+(stage / 'release-notes.md').write_text(notes, encoding='utf-8')
+for name in (native_name, browser_name, native_name + '.sha256', browser_name + '.sha256', 'release-notes.md'):
+    (stage / name).replace(dist / name)
 PY

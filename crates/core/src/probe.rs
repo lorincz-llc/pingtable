@@ -355,11 +355,15 @@ mod imp {
         };
         let wall_us = elapsed_us(start);
         let text = String::from_utf8_lossy(&output.stdout);
-        parse_ping_output(&text, output.status.success(), addr, wall_us, params.timeout)
+        let errors = String::from_utf8_lossy(&output.stderr);
+        parse_ping_output(&text, &errors, output.status.success(), addr, wall_us, params.timeout)
     }
 
+    /// Read one run of the system `ping`: what it printed (`text`), what it
+    /// complained about (`errors`) and whether it called the run a success.
     pub(super) fn parse_ping_output(
         text: &str,
+        errors: &str,
         success: bool,
         addr: IpAddr,
         wall_us: u32,
@@ -375,8 +379,11 @@ mod imp {
             }
             return Outcome { status: Status::Ok, os_code: None, rtt_us: Some(rtt_us), ttl, reply_addr: Some(addr) };
         }
-        let lower = text.to_ascii_lowercase();
-        let status = if lower.contains("host unreachable") {
+        // Some answers are printed as errors: "ping: connect: Network is
+        // unreachable" when there is no route, "ping: local error: message too
+        // long" for a packet too big to leave.
+        let lower = format!("{text}\n{errors}").to_ascii_lowercase();
+        let status = if lower.contains("host unreachable") || lower.contains("no route to host") {
             Status::HostUnreachable
         } else if lower.contains("net unreachable") || lower.contains("network is unreachable") {
             Status::NetUnreachable
@@ -386,6 +393,12 @@ mod imp {
             Status::TtlExpired
         } else if lower.contains("frag needed") || lower.contains("message too long") {
             Status::PacketTooBig
+        } else if !text.lines().any(|line| line.starts_with("PING ")) {
+            // The tool gave up before sending anything: it may not be allowed
+            // to (a container without the right to open the socket), or this
+            // version may not know an option pingtable passed. That is not the
+            // host timing out.
+            Status::Unsupported
         } else {
             Status::Timeout
         };
@@ -408,11 +421,24 @@ mod imp {
     mod tests {
         use super::*;
 
-        const OK: &str = "PING 1.1.1.1 (1.1.1.1) 56(84) bytes of data.\n64 bytes from 1.1.1.1: icmp_seq=1 ttl=57 time=3.42 ms\n\n--- 1.1.1.1 ping statistics ---\n1 packets transmitted, 1 received, 0% packet loss, time 0ms\n";
+        // Output of iputils 20240117 (`LC_ALL=C ping -n -c 1 -W 1 -s 32 ...`),
+        // with the addresses swapped for documentation ones.
+        const OK: &str = "PING 192.0.2.7 (192.0.2.7) 32(60) bytes of data.\n40 bytes from 192.0.2.7: icmp_seq=1 ttl=57 time=3.42 ms\n\n--- 192.0.2.7 ping statistics ---\n1 packets transmitted, 1 received, 0% packet loss, time 0ms\nrtt min/avg/max/mdev = 3.420/3.420/3.420/0.000 ms\n";
+        const NO_ANSWER: &str = "PING 192.0.2.7 (192.0.2.7) 32(60) bytes of data.\n\n--- 192.0.2.7 ping statistics ---\n1 packets transmitted, 0 received, 100% packet loss, time 0ms\n\n";
+        const NO_ARP_ANSWER: &str = "PING 192.168.1.77 (192.168.1.77) 32(60) bytes of data.\nFrom 192.168.1.5 icmp_seq=1 Destination Host Unreachable\n\n--- 192.168.1.77 ping statistics ---\n1 packets transmitted, 0 received, +1 errors, 100% packet loss, time 0ms\n\n";
+        const TTL_RAN_OUT: &str = "PING 192.0.2.7 (192.0.2.7) 32(60) bytes of data.\nFrom 192.168.1.1 icmp_seq=1 Time to live exceeded\n\n--- 192.0.2.7 ping statistics ---\n1 packets transmitted, 0 received, +1 errors, 100% packet loss, time 0ms\n\n";
+        const TOO_BIG: (&str, &str) = (
+            "PING 192.0.2.7 (192.0.2.7) 3000(3028) bytes of data.\n\n--- 192.0.2.7 ping statistics ---\n1 packets transmitted, 0 received, +1 errors, 100% packet loss, time 0ms\n\n",
+            "ping: local error: message too long, mtu=1500\n",
+        );
+
+        fn read(text: &str, errors: &str, success: bool) -> Outcome {
+            parse_ping_output(text, errors, success, "192.0.2.7".parse().unwrap(), 9000, Duration::from_secs(1))
+        }
 
         #[test]
         fn reads_time_and_ttl() {
-            let o = parse_ping_output(OK, true, "1.1.1.1".parse().unwrap(), 9000, Duration::from_secs(1));
+            let o = read(OK, "", true);
             assert_eq!(o.status, Status::Ok);
             assert_eq!(o.rtt_us, Some(3420));
             assert_eq!(o.ttl, Some(57));
@@ -420,20 +446,37 @@ mod imp {
 
         #[test]
         fn slow_reply_counts_as_timeout() {
-            let o = parse_ping_output(OK, true, "1.1.1.1".parse().unwrap(), 9000, Duration::from_millis(2));
+            let o = parse_ping_output(OK, "", true, "192.0.2.7".parse().unwrap(), 9000, Duration::from_millis(2));
             assert_eq!(o.status, Status::Timeout);
         }
 
         #[test]
         fn failures_are_classified() {
-            let addr: IpAddr = "10.9.9.9".parse().unwrap();
-            let t = Duration::from_secs(1);
-            let o = parse_ping_output("From 10.0.0.1 icmp_seq=1 Destination Host Unreachable\n", false, addr, 0, t);
-            assert_eq!(o.status, Status::HostUnreachable);
-            let o = parse_ping_output("1 packets transmitted, 0 received, 100% packet loss\n", false, addr, 0, t);
-            assert_eq!(o.status, Status::Timeout);
-            let o = parse_ping_output("PING 1.1.1.1\nFrom 192.168.1.1 icmp_seq=1 Time to live exceeded\n", false, addr, 0, t);
+            assert_eq!(read(NO_ANSWER, "", false).status, Status::Timeout);
+            let o = read(NO_ARP_ANSWER, "", false);
+            assert_eq!((o.status, o.reply_addr), (Status::HostUnreachable, Some("192.168.1.5".parse().unwrap())));
+            let o = read(TTL_RAN_OUT, "", false);
             assert_eq!((o.status, o.reply_addr), (Status::TtlExpired, Some("192.168.1.1".parse().unwrap())));
+            assert_eq!(read(TOO_BIG.0, TOO_BIG.1, false).status, Status::PacketTooBig, "said on stderr");
+            // No route: said on stderr, before the banner.
+            assert_eq!(read("", "ping: connect: Network is unreachable\n", false).status, Status::NetUnreachable);
+        }
+
+        #[test]
+        fn a_run_that_never_started_is_not_a_timeout() {
+            // The tool stopped before it sent anything, so the host was never asked.
+            let never = [
+                // In a container without the right to open the socket.
+                "ping: socktype: SOCK_RAW\nping: socket: Operation not permitted\nping: => missing cap_net_raw+p capability or setuid?\n",
+                // A version that does not know an option.
+                "ping: invalid option -- 'Z'\n\nUsage\n  ping [options] <destination>\n",
+                "ping: the decimal value of TOS bits must be in range 0-255: 999\n",
+                // A source address this computer does not have.
+                "ping: bind: Cannot assign requested address\n",
+            ];
+            for errors in never {
+                assert_eq!(read("", errors, false).status, Status::Unsupported, "{errors}");
+            }
         }
     }
 }

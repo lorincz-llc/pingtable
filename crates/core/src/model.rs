@@ -89,6 +89,20 @@ pub struct Sample {
     pub rtt_us: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub ttl: Option<u8>,
+    /// Beats this probe stands for. A host is never probed twice at once, so
+    /// while a failed probe waits for its timeout the beats that come due are
+    /// skipped. They count as lost with it: 1 for an ordinary probe, more for
+    /// a failure that outlasted its interval.
+    #[serde(skip_serializing_if = "is_one", default = "one")]
+    pub beats: u16,
+}
+
+fn is_one(n: &u16) -> bool {
+    *n == 1
+}
+
+fn one() -> u16 {
+    1
 }
 
 /// Settings that can be set for one host or one group and win over the
@@ -251,4 +265,13 @@ pub struct AlertEvent {
 pub enum AlertKind {
     Down,
     Up,
+}
+
+/// Something the person watching should be told that is not about one host:
+/// an alert command that could not be started, or was stopped for running too long.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Note {
+    pub seq: u64,
+    pub t_ms: i64,
+    pub text: String,
 }

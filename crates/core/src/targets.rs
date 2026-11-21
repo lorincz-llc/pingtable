@@ -1,112 +1,11 @@
-//! Port check: is anything listening on these TCP ports of one host?
-//!
-//! Every port gets one TCP connection attempt, all at the same time, so the
-//! whole check takes no longer than one timeout. A connection that opens is
-//! closed again at once; no data is sent.
-//!
-//! * the connection opens: something is listening (`open`)
-//! * the host refuses it: the host is there, nothing listens (`closed`)
-//! * nothing comes back: a firewall dropped it, or the host is off (`no_answer`)
+//! Parse named TCP endpoints for the host list and traceroute.
 
-use crate::model::{Probe, Status};
+use crate::model::Probe;
 use crate::parse::{parse_host_list, ParseOptions};
-use crate::probe::{self, ProbeParams};
-use serde::Serialize;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
-use std::thread;
+use std::net::{IpAddr, Ipv6Addr};
 
-/// Most ports one check may try. This is a check of a few chosen ports, not a
-/// scan of a whole range.
+/// Maximum number of named TCP monitors to add per host in one request.
 pub const MAX_PORTS: usize = 64;
-
-/// The shortest time a port check should wait for each port. Windows tries a
-/// refused connection again before it reports the refusal, which takes about
-/// two seconds; with a shorter wait a closed port would be reported as one
-/// that gave no answer.
-pub const MIN_TIMEOUT_MS: u32 = 3000;
-
-/// The ports offered as one-click choices, in the order they are shown.
-pub const COMMON_PORTS: [u16; 12] = [22, 80, 443, 3389, 445, 53, 25, 3306, 5432, 1433, 8080, 8443];
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PortState {
-    /// The connection opened: something is listening.
-    Open,
-    /// The host answered and refused: nothing is listening.
-    Closed,
-    /// No reply before the timeout: filtered by a firewall, or the host is off.
-    NoAnswer,
-    /// The attempt could not be made or failed some other way.
-    Failed,
-}
-
-impl PortState {
-    /// Short text for a printed result.
-    pub fn label(self) -> &'static str {
-        match self {
-            PortState::Open => "open",
-            PortState::Closed => "closed",
-            PortState::NoAnswer => "no answer",
-            PortState::Failed => "failed",
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct PortResult {
-    pub port: u16,
-    /// What usually listens on this port, when it is a well-known one.
-    pub service: Option<&'static str>,
-    pub state: PortState,
-    pub status: Status,
-    /// Time the connection took to open, or to be refused.
-    pub rtt_us: Option<u32>,
-}
-
-/// What usually listens on a TCP port. Only a label: the check does not look
-/// at what answers.
-pub fn service_name(port: u16) -> Option<&'static str> {
-    Some(match port {
-        21 => "FTP",
-        22 => "SSH",
-        23 => "Telnet",
-        25 => "SMTP",
-        53 => "DNS",
-        80 => "HTTP",
-        88 => "Kerberos",
-        110 => "POP3",
-        135 => "RPC",
-        139 => "NetBIOS",
-        143 => "IMAP",
-        179 => "BGP",
-        389 => "LDAP",
-        443 => "HTTPS",
-        445 => "SMB",
-        465 => "SMTPS",
-        587 => "Mail submission",
-        631 => "IPP printing",
-        636 => "LDAPS",
-        993 => "IMAPS",
-        995 => "POP3S",
-        1433 => "SQL Server",
-        1521 => "Oracle",
-        1883 => "MQTT",
-        2049 => "NFS",
-        3306 => "MySQL",
-        3389 => "Remote Desktop",
-        5432 => "PostgreSQL",
-        5900 => "VNC",
-        5985 => "WinRM",
-        5986 => "WinRM over TLS",
-        6379 => "Redis",
-        8080 => "HTTP alternate",
-        8443 => "HTTPS alternate",
-        9100 => "Printer",
-        27017 => "MongoDB",
-        _ => return None,
-    })
-}
 
 /// Read a list of ports as a person types it: `22, 80 443`, `8000-8010`.
 /// Repeats are dropped and the order is kept.
@@ -173,7 +72,7 @@ pub fn split_target(text: &str) -> Result<(String, Option<IpAddr>, Option<u16>),
             },
         )),
         [] => Err(format!("\"{text}\" is not a host name or an address.")),
-        _ => Err("A port check takes one host, not a range or a block.".into()),
+        _ => Err("This operation takes one host, not a range or a block.".into()),
     }
 }
 
@@ -203,43 +102,9 @@ pub fn entries_for_ports(entry: &str, ports: &[u16], keep_ping: bool) -> Vec<Str
     entries
 }
 
-/// Try every port once, all at the same time. Results come back in the order
-/// the ports were given. Only `timeout` and the source addresses of `params`
-/// matter here.
-pub fn check(target: IpAddr, ports: &[u16], params: &ProbeParams) -> Vec<PortResult> {
-    let mut wanted: Vec<u16> = Vec::new();
-    for &port in ports {
-        if port > 0 && !wanted.contains(&port) && wanted.len() < MAX_PORTS {
-            wanted.push(port);
-        }
-    }
-    let try_port = |port: u16| -> PortResult {
-        let outcome = probe::tcp(SocketAddr::new(target, port), params);
-        let state = match outcome.status {
-            Status::Ok => PortState::Open,
-            Status::Refused => PortState::Closed,
-            Status::Timeout => PortState::NoAnswer,
-            _ => PortState::Failed,
-        };
-        PortResult { port, service: service_name(port), state, status: outcome.status, rtt_us: outcome.rtt_us }
-    };
-    thread::scope(|scope| {
-        let handles: Vec<_> = wanted.iter().map(|&port| (port, scope.spawn(move || try_port(port)))).collect();
-        handles
-            .into_iter()
-            .map(|(port, handle)| {
-                // A probe that panicked is reported as a failed attempt, not lost.
-                handle.join().unwrap_or(PortResult { port, service: service_name(port), state: PortState::Failed, status: Status::Error, rtt_us: None })
-            })
-            .collect()
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::TcpListener;
-    use std::time::Duration;
 
     #[test]
     fn ports_are_read_the_way_people_type_them() {
@@ -273,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn a_port_check_takes_exactly_one_host() {
+    fn the_target_is_exactly_one_host() {
         assert!(split_target("").unwrap_err().contains("Type a host"));
         assert!(split_target("a.example b.example").unwrap_err().contains("one host"));
         assert!(split_target("192.0.2.0/30").unwrap_err().contains("not a range"));
@@ -296,35 +161,10 @@ mod tests {
         assert_eq!(entries_for_ports("https://example.com", &[22], false), ["https://example.com"]);
         assert_eq!(entries_for_ports("# a note", &[22], false), ["# a note"]);
         // Every result is something the host list accepts as a TCP check.
-        for entry in entries_for_ports("192.0.2.9", &COMMON_PORTS, false) {
+        for entry in entries_for_ports("192.0.2.9", &[22, 80, 443], false) {
             let report = parse_host_list(&entry, &ParseOptions::default());
             assert!(report.warnings.is_empty() && matches!(report.hosts[0].probe, Probe::Tcp { .. }), "{entry}");
         }
     }
 
-    #[test]
-    fn open_and_closed_ports_are_told_apart() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let open = listener.local_addr().unwrap().port();
-        // A port that was just free: bind it, note it, let it go.
-        let closed = {
-            let gone = TcpListener::bind("127.0.0.1:0").unwrap();
-            gone.local_addr().unwrap().port()
-        };
-        let params = ProbeParams { timeout: Duration::from_millis(1500), ..ProbeParams::default() };
-        let results = check("127.0.0.1".parse().unwrap(), &[open, closed, open], &params);
-        assert_eq!(results.len(), 2, "a repeated port is tried once: {results:?}");
-        assert_eq!((results[0].port, results[0].state, results[0].status), (open, PortState::Open, Status::Ok));
-        assert!(results[0].rtt_us.is_some());
-        assert_eq!((results[1].port, results[1].state, results[1].status), (closed, PortState::Closed, Status::Refused));
-    }
-
-    #[test]
-    fn well_known_ports_have_a_label() {
-        assert_eq!(service_name(443), Some("HTTPS"));
-        assert_eq!(service_name(3389), Some("Remote Desktop"));
-        assert_eq!(service_name(49152), None);
-        assert!(COMMON_PORTS.iter().all(|&p| service_name(p).is_some()));
-        assert!(check("127.0.0.1".parse().unwrap(), &[], &ProbeParams::default()).is_empty());
-    }
 }

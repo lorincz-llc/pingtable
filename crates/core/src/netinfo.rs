@@ -2,10 +2,24 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, ToSocketAddrs};
+use std::time::Duration;
+
+/// How long pingtable waits for one name lookup, forward or reverse.
+pub const LOOKUP_LIMIT: Duration = Duration::from_secs(5);
 
 /// Resolve a host name to one address. IPv4 is chosen unless `prefer_ipv6`
 /// is set or the name only has IPv6 addresses.
+///
+/// A name that ends in a number, such as `10.0.0.010`, is not looked up: the
+/// system resolver would read it as some other address (see
+/// [`crate::parse::numeric_name_problem`]).
 pub fn resolve(host: &str, prefer_ipv6: bool) -> Option<IpAddr> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return Some(ip);
+    }
+    if crate::parse::numeric_name_problem(host).is_some() {
+        return None;
+    }
     let addrs: Vec<IpAddr> = (host, 0u16).to_socket_addrs().ok()?.map(|a| a.ip()).collect();
     let wanted = addrs.iter().find(|a| a.is_ipv6() == prefer_ipv6);
     wanted.or(addrs.first()).copied()
@@ -20,6 +34,35 @@ pub fn reverse(ip: IpAddr) -> Option<String> {
     } else {
         Some(name)
     }
+}
+
+/// [`resolve`], giving up after `limit`. The system resolver has no time limit
+/// of its own that a caller can set, and with a resolver that does not answer
+/// it can hold its caller for half a minute. An address is returned at once.
+pub fn resolve_within(host: &str, prefer_ipv6: bool, limit: Duration) -> Option<IpAddr> {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return Some(ip);
+    }
+    let name = host.to_string();
+    within(limit, move || resolve(&name, prefer_ipv6))
+}
+
+/// [`reverse`], giving up after `limit`.
+pub fn reverse_within(ip: IpAddr, limit: Duration) -> Option<String> {
+    within(limit, move || reverse(ip))
+}
+
+/// Run a lookup on a thread of its own and wait at most `limit` for it. A
+/// lookup that is abandoned finishes on its own later; its answer is dropped.
+fn within<T: Send + 'static>(limit: Duration, lookup: impl FnOnce() -> Option<T> + Send + 'static) -> Option<T> {
+    let (answer, waiting) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("pingtable-lookup".into())
+        .spawn(move || {
+            let _ = answer.send(lookup());
+        })
+        .ok()?;
+    waiting.recv_timeout(limit).ok().flatten()
 }
 
 /// This computer's name.
@@ -180,5 +223,18 @@ mod general_tests {
         assert!(all.iter().any(|i| i.loopback), "{all:?}");
         assert!(all.iter().position(|i| i.loopback).unwrap() >= all.iter().filter(|i| !i.loopback).count());
         assert_eq!(source_for("127.0.0.1".parse().unwrap()), Some("127.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn names_that_end_in_a_number_are_not_looked_up() {
+        // The system resolver would read `127.000.000.010` as 127.0.0.8.
+        let began = std::time::Instant::now();
+        assert_eq!(resolve("127.000.000.010", false), None);
+        assert_eq!(resolve_within("127.1", false, Duration::from_secs(5)), None);
+        assert_eq!(resolve("0x7f000001", false), None);
+        assert!(began.elapsed() < Duration::from_secs(1), "no lookup was made");
+        // Addresses are still taken as they are.
+        assert_eq!(resolve("127.0.0.10", false), Some("127.0.0.10".parse().unwrap()));
+        assert_eq!(resolve_within("::1", false, Duration::from_secs(5)), Some("::1".parse().unwrap()));
     }
 }

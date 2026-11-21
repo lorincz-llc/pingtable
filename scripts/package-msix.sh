@@ -16,8 +16,8 @@
 # Without them the script still packs, as a preview with a made-up identity,
 # to prove the package builds. A preview cannot be submitted.
 #
-# Needs makeappx.exe from the Windows SDK, so run it on Windows (Git Bash) or
-# from WSL on a Windows machine. MAKEAPPX names the program if it is not in
+# Needs makeappx.exe from the Windows SDK. Run packing on native Windows in
+# Git Bash with the files from the Linux cross-build. MAKEAPPX names the program if it is not in
 # the usual place. How to submit the package: docs/store.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -68,7 +68,11 @@ done
 cp LICENSE "$stage/LICENSE.txt"
 cp DISCLAIMER.md "$stage/DISCLAIMER.txt"
 cp NOTICE "$stage/NOTICE.txt"
-cp THIRD-PARTY-NOTICES.md "$stage/"
+export LC_ALL=C
+sha256sum --binary dist/windows/THIRD-PARTY-NOTICES.md dist/windows/WebView2Loader.dll dist/windows/third-party/* \
+    | cmp -s - dist/windows/NOTICES.sha256 || die "The cross-build notices or loader differ. Copy dist/windows from the matching build."
+cp dist/windows/THIRD-PARTY-NOTICES.md "$stage/"
+cp -R dist/windows/third-party "$stage/"
 
 kind=$(python3 -I - "$stage" <<'PY'
 import importlib.util, os, pathlib, re, sys
@@ -76,6 +80,10 @@ import importlib.util, os, pathlib, re, sys
 stage = pathlib.Path(sys.argv[1])
 root = pathlib.Path('.')
 version = re.search(r'^version = "([^"]+)"', (root / 'Cargo.toml').read_text(), re.M).group(1)
+
+for exe in ('pingtable.exe', 'pingtable-cli.exe'):
+    if f'ProductVersion\0{version}\0'.encode('utf-16-le') not in (stage / exe).read_bytes():
+        sys.exit(f'package-msix: {exe} does not have ProductVersion {version}. Rebuild first.')
 
 name = os.environ.get('PINGTABLE_STORE_NAME', '')
 publisher = os.environ.get('PINGTABLE_STORE_PUBLISHER', '')

@@ -78,10 +78,10 @@ PackageUrl: {source}
 License: Apache-2.0
 LicenseUrl: {source}/blob/main/LICENSE
 Copyright: Copyright 2026 Lorincz LLC
-ShortDescription: Ping many hosts and watch them in one table, and check whether TCP ports are listening.
+ShortDescription: Monitor hosts and named TCP services in one table.
 Description: |-
   pingtable pings every machine you care about, once a second, and shows who is answering, how fast, and who just stopped.
-  It also checks whether TCP ports are listening, traces routes, measures loss and jitter over a set time, and can alert when a host goes down.
+  It traces routes, measures loss and jitter, and can alert when a monitored host or TCP service goes down.
   It comes as a window app (pingtable) and a command-line program (pingtable-cli) with JSON output, a local HTTP API and an MCP server for AI agents.
   No installer and no administrator rights are needed.
 Moniker: pingtable
@@ -89,7 +89,7 @@ Tags:
 - ping
 - network
 - monitoring
-- port-check
+- tcp-monitoring
 - traceroute
 - cli
 - mcp

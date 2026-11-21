@@ -6,50 +6,108 @@
   "status": "direction-confirmed",
   "inspiration": [],
   "choices": {
-    "layout": "Full-window data table under a 64px top bar; bottom detail drawer; hard 1px and 2px rules, no rounded corners, no shadows except on overlays",
-    "palette": "Two looks. Light (the default): white, black rules and text, Petrol #0B5F6A accent. Dark, called Graphite: neutral dark grey #111315 with a lighter Petrol #56C5D0. Red-orange for down, amber for failing, green only for the glow when a host comes back",
-    "display_font": "Heavy grotesque system stack (Archivo Black, Inter Tight, Segoe UI Variable Display) at weight 900, uppercase for headings and buttons",
-    "body_font": "Monospace system stack (JetBrains Mono, Cascadia Mono, Consolas) with tabular numerals",
-    "mark": "Wordmark PINGTABLE in the display font beside a Petrol square",
+    "layout": "Look B, the NOC console. Full-window data table under a 48px console bar that is dark in both looks; bottom detail drawer; 1px rules, with a 1px accent-tinted line (not a hard rule) under the bar and above the drawer; no rounded corners; shadows on overlays only. Compact rows of 26px with visible zebra striping and no rule between host rows (the --row-line token brings rules back); a roomy choice of 32px in the menu. Failures in the Last column, the group's 'N down' and the detail panel's state are tight status chips (a tint and a 1px outline of their colour)",
+    "palette": "Two looks on one structure. Console (dark): near-black #07090B, cool grey text #D5E2E8, luminous cyan #46DDE6 for words and #2FD6E1 for marks. Daylight (light, the default): a light table #FBFCFC with near-black text #0D181D and a deep teal #006C76 for words (#00909D for marks), under the same dark console bar. Red-orange for down; amber for failing, stale results and the 100-199 ms latency band; magenta for 200 ms and over, so a far host that answers never reads as a failed one; green only for the glow when a host comes back. State squares keep their shapes (solid, hollow, half filled, outlined, hatched), so state never rests on colour alone",
+    "display_font": "Heavy grotesque system stack (Archivo Black, Inter Tight, Segoe UI Variable Display) at weight 900, for the PINGTABLE wordmark and the big empty-state and link headings only",
+    "body_font": "Words (buttons, menus, descriptions, group names, dialogs, chips) in the system sans-serif (Segoe UI Variable Text, Segoe UI, system-ui) at 13px, sentence case without tracking. Data (hosts, addresses, numbers, times, the host list editor, tallies, the footer status line, menu and pane headings) in JetBrains Mono, bundled with the program, at 12.5px with tabular numerals and no ligatures: weight 500 in the rows, 600 for the tallies (19px) and the detail title; fallbacks Cascadia Mono, Consolas and the system monospace",
+    "mark": "Wordmark PINGTABLE in the display font beside a cyan square that glows softly in the console bar",
     "supergraphic": "none",
     "texture": "none",
     "symbol": "One Petrol square (#1596A6) on a transparent ground: candidate B, Square, from brand/icons/preview.html"
   },
   "tokens": {
     "light": {
-      "bg": "#FFFFFF",
-      "surface": "#F6F6F3",
-      "raised": "#ECECE8",
-      "rule": "#D6D6D0",
-      "rule_strong": "#000000",
-      "text": "#000000",
-      "dim": "#555555",
-      "faint": "#8A8A85",
-      "accent": "#0B5F6A",
-      "accent_block": "#0B5F6A",
-      "down": "#C8371C",
-      "warn": "#9A6200",
-      "good": "#1A7F4B"
+      "bg": "#FBFCFC",
+      "surface": "#F1F4F5",
+      "raised": "#E6EBED",
+      "stripe": "#EDF1F2",
+      "rule": "#D2DBDF",
+      "row_rule": "#E4EAEC",
+      "row_line": "transparent",
+      "rule_strong": "#0D171C",
+      "text": "#0D181D",
+      "dim": "#48575F",
+      "faint": "#56666E",
+      "accent": "#006C76",
+      "accent_mark": "#00909D",
+      "accent_block": "#006A74",
+      "accent_hover": "#005159",
+      "down": "#C9301D",
+      "warn": "#8A5900",
+      "good": "#0B8A4E",
+      "lat_good": "text",
+      "lat_slow": "#8A5900",
+      "lat_bad": "#A01F7A",
+      "row_hover": "#E0F0F1",
+      "row_selected": "#D0EAED",
+      "faint_on_selected": "#48575F",
+      "down_on_selected": "#B72C19",
+      "warn_on_selected": "#7C5000",
+      "lat_slow_on_selected": "#7C5000",
+      "lat_bad_on_selected": "#8F1B6D",
+      "menu_hover": "#DCF0F2",
+      "btn_rule": "#B4C1C7",
+      "overlay_rule": "#A6B4BB",
+      "head_bg": "#F1F4F5",
+      "head_rule": "#B4C1C7",
+      "chip_down": "#A82514",
+      "chip_tint": "10% of the chip's colour, outline 45%",
+      "glow": "a 2px ring of the mark's colour at 16%"
     },
     "dark": {
-      "bg": "#111315",
-      "surface": "#171A1C",
-      "raised": "#1E2225",
-      "rule": "#2C3135",
-      "rule_strong": "#E6E8EA",
-      "text": "#ECEEEF",
-      "dim": "#9AA1A6",
-      "faint": "#646B70",
-      "accent": "#56C5D0",
-      "accent_block": "#0B5F6A",
-      "down": "#F26B50",
-      "warn": "#E9B949",
-      "good": "#4AD98A"
+      "bg": "#07090B",
+      "surface": "#0B0F12",
+      "raised": "#131A1F",
+      "stripe": "#10151A",
+      "rule": "#1B252C",
+      "row_rule": "#10171C",
+      "row_line": "transparent",
+      "rule_strong": "#2A3A44",
+      "text": "#D5E2E8",
+      "dim": "#8A9CA6",
+      "faint": "#75878F",
+      "accent": "#46DDE6",
+      "accent_mark": "#2FD6E1",
+      "accent_block": "#0A6A73",
+      "accent_hover": "#0C7D87",
+      "down": "#FF5E4A",
+      "warn": "#FFBF45",
+      "good": "#3FF0A0",
+      "lat_good": "accent",
+      "lat_slow": "#FFBF45",
+      "lat_bad": "#FF78D6",
+      "row_hover": "#121E24",
+      "row_selected": "#072A30",
+      "faint_on_selected": "#93A5AE",
+      "down_on_selected": "#FF7362",
+      "warn_on_selected": "#FFC75C",
+      "lat_slow_on_selected": "#FFC75C",
+      "lat_bad_on_selected": "#FF8CDC",
+      "menu_hover": "#0A2A30",
+      "btn_rule": "#27353E",
+      "overlay_rule": "#26343D",
+      "head_bg": "#0A0D10",
+      "head_rule": "#22303A",
+      "chip_down": "down",
+      "chip_tint": "14% of the chip's colour, outline 50%",
+      "glow": "a 6px glow of the mark's colour at 70%"
     },
+    "bar": "The console bar wears the dark tokens in both looks (app.css sets them again on .bar; the main menu inside it takes the light ones back). The window's title bar follows the bar: dark in both looks",
     "icon": "#1596A6",
-    "row_height_px": 32,
-    "motion": "Nothing blinks and nothing flashes on routine updates. A row glows softly for four seconds when its host goes down (red) or comes back (green). Short fades on overlays only",
-    "source": "ui/app.css :root and :root[data-theme=dark] custom properties are the working copy"
+    "row_height_px": 26,
+    "motion": "Nothing blinks and nothing flashes on routine updates. State squares, the run light and the brand square glow softly and do not move. A row glows softly for four seconds when its host goes down (red) or comes back (green). Menus fade in over 100 ms; short fades on overlays only; all of it off under reduced motion",
+    "source": "ui/app.css :root and :root[data-theme=dark] custom properties are the working copy; --row-h there drives the virtual scrolling in ui/app.js",
+    "row_height_roomy_px": 32,
+    "latency_bands_ms": [100, 200],
+    "type": {
+      "words": "13px system sans-serif",
+      "data": "12.5px JetBrains Mono (bundled), weight 500 in the rows, tabular numerals, no ligatures",
+      "headings": "column headings 12px sans weight 600, dim; menu and pane headings 11 to 11.5px mono weight 500, dim",
+      "tallies": "19px JetBrains Mono, weight 600",
+      "chips": "11px sans, weight 600",
+      "wordmark": "display font, 17px, weight 900"
+    },
+    "contrast": "Every text colour (text, dim, faint, accent, down, warn, lat_slow, lat_bad) is at least 4.5:1 on bg, stripe, row_hover and the group row, and chip words on their tint too. A selected row is darker by day, so inside it faint, down, warn and the bands take the *_on_selected values, which are at least 4.5:1 on row_selected. Marks (accent_mark, down, warn) are at least 3:1 on all of those. Lowest measured on 2026-11-21: text 4.56:1 light (down on a hovered row), 4.54:1 dark (faint on a hovered row); chip words 4.75:1 (dark, hovered row); marks 3.04:1 (light accent_mark on a selected row)."
   },
   "decisions": [
     {
@@ -79,13 +137,53 @@
     },
     {
       "date": "2026-11-16",
-      "status": "proposed",
+      "status": "superseded on 2026-11-21 (look B; JetBrains Mono bundled)",
       "decision": "Exact colour values and the system font stacks (none bundled) are a first draft."
+    },
+    {
+      "date": "2026-11-21",
+      "status": "confirmed by owner's direction",
+      "decision": "A calm, functional data table rather than a stylised one: system sans-serif for words and monospace for data, near-black text in light and soft off-white in dark, light grey rules, faint zebra stripes, sentence-case headings, buttons, tallies, badges and dialog titles without the heavy display font (kept for the wordmark only), 26px rows by default. Hard rules, square corners, the Petrol accent and the Petrol square stay."
+    },
+    {
+      "date": "2026-11-21",
+      "status": "confirmed by the lead after the UI review",
+      "decision": "Stripes strong enough to see (light #F2F3F0, dark #191C1F) and no rule under host rows, which was the crisper of the two in both looks; faint text raised to 4.5:1 everywhere it is used; failing and recovering get their own square shapes; the magnitude bar under Last ms and the permanent underline under the host count are gone; resize ticks in the heading show only on hover. The owner then asked that both looks stay modern and look cool: a design pass follows, and these values are tokens it can change."
+    },
+    {
+      "date": "2026-11-21",
+      "status": "confirmed by owner",
+      "decision": "From a comparison of three looks (A Refined, B NOC console, C Soft modern) the owner chose B, the NOC console: near-black with a luminous cyan in the dark, a light table under the same dark console bar by day, softly glowing state squares, data in a heavier monospace, failures as status chips and the Last ms value in three latency bands (under 100, 100 to 199, 200 ms and over; magenta for the last). He also chose to bundle JetBrains Mono for the data while words stay in the system sans. Square corners, the cyan-teal square and nothing blinking stay."
+    },
+    {
+      "date": "2026-11-21",
+      "status": "confirmed by the lead's merge rules",
+      "decision": "Look B merged into ui/app.css as its tokens, keeping the earlier fixes: no rule under host rows, so B's stripes were deepened to stay visible (light #EDF1F2, dark #10151A) and the hover tints with them; the light mark colour was deepened from #009AA8 to #00909D and the light menu hover lightened, so marks keep 3:1 and the danger item 4.5:1 on every ground; a muted or stale row's Last cell steps back to grey with a neutral chip. JetBrains Mono ships as three Latin subsets with hinting kept (400, 500, 600)."
     }
   ],
   "rights": {
     "trademark_clearance": "not-assessed",
     "registration": "not-verified",
-    "provenance": "Original work. Fonts are system fonts; none are bundled. The name has not been checked for trademarks."
+    "provenance": "Original work. Words use system fonts. JetBrains Mono 2.304 (Copyright 2020 The JetBrains Mono Project Authors, SIL Open Font License 1.1, no Reserved Font Name) is bundled for data, cut to Latin; its licence is in ui/fonts/OFL.txt and in THIRD-PARTY-NOTICES.md. The name has not been checked for trademarks."
+  },
+  "assets": {
+    "fonts": [
+      {
+        "family": "JetBrains Mono",
+        "css_family": "pt JetBrains Mono",
+        "version": "2.304",
+        "license": "OFL-1.1",
+        "license_file": "ui/fonts/OFL.txt",
+        "source": "https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304 (fonts/webfonts/*.woff2)",
+        "files": [
+          "ui/fonts/JetBrainsMono-Regular.woff2",
+          "ui/fonts/JetBrainsMono-Medium.woff2",
+          "ui/fonts/JetBrainsMono-SemiBold.woff2"
+        ],
+        "weights": [400, 500, 600],
+        "subset": "pyftsubset, unicodes U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2190-2199, U+2212, U+2215, U+2248, U+2260, U+2264-2265, U+00B5, U+03BC, U+FEFF, U+FFFD; layout features kern tnum zero ss01 ss02 case ccmp locl mark mkmk (no liga, calt or cv*); hinting kept; all name records kept; woff2",
+        "served_at": "/fonts/ by crates/app/src/server.rs (include_bytes!, font/woff2)"
+      }
+    ]
   }
 }

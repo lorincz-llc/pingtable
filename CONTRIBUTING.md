@@ -11,11 +11,8 @@ that does not fit the direction of the project may be declined.
 ## Before a pull request
 
 ```bash
-cargo test --workspace
-```
-
-```bash
-cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
 - Keep a change small and about one thing.

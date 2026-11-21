@@ -3,13 +3,13 @@
 //!
 //! Two programs are built from this crate:
 //!
-//! * `pingtable`, a console program: `pingtable [serve]`, `once`, `ports`,
-//!   `api`, and `mcp` (the checks as tools for an AI agent).
+//! * `pingtable`, a console program: `pingtable [serve]`, `once`,
+//!   `api`, `mcp` (the checks as tools for an AI agent).
 //! * `pingtable-window`, a Windows GUI program that shows the same interface
 //!   in its own window.
 
 /// Who pingtable is credited to. Shown in the About box and in the exe details.
-pub const CREDITS: &str = "pingtable@lorincz.llc";
+pub const CREDITS: &str = "hello@pingtable.net";
 
 /// The project's home on the web.
 pub const WEBSITE: &str = "https://pingtable.net";

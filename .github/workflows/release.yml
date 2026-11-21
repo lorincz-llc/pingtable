@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RUST_TOOLCHAIN: 1.98.0
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Test and package the tagged sources
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check version
+        shell: bash
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"])')
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$GITHUB_REF_NAME" == "v$version" ]]
+      - name: Install Rust and MinGW
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component clippy --component rust-docs --target x86_64-pc-windows-gnu --no-self-update
+          rustup default "$RUST_TOOLCHAIN"
+          sudo apt-get update
+          sudo apt-get install --yes gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+      - name: Run Linux tests and Clippy
+        run: |
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Package both Windows editions
+        run: |
+          scripts/package-windows.sh
+          cd dist
+          version=${GITHUB_REF_NAME#v}
+          native="pingtable-$version-windows-x64.zip"
+          browser="pingtable-$version-browser-windows-x64.zip"
+          sha256sum -- "$native" "$browser" > SHA256SUMS
+          cat "$native.sha256" "$browser.sha256" | cmp - SHA256SUMS
+      - name: Attest the ZIP digests
+        if: github.event.repository.private == false || vars.ENABLE_PRIVATE_ATTESTATIONS == 'true'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: Save release inputs
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+            dist/SHA256SUMS
+            dist/release-notes.md
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  windows:
+    name: Test Windows and the packaged executables
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact }}
+          merge-multiple: true
+          path: dist
+      - name: Verify release ZIPs on Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $native = "pingtable-$version-windows-x64.zip"
+          $browser = "pingtable-$version-browser-windows-x64.zip"
+          $notes = Get-Content -Raw dist/release-notes.md
+          if (!$notes.Contains('The Pingtable programs are unsigned.')) {
+            throw 'The release notes must identify the current unsigned build.'
+          }
+          foreach ($zip in $browser,$native) {
+            $hash = (Get-FileHash -Algorithm SHA256 "dist/$zip").Hash.ToLowerInvariant()
+            if ((Get-Content "dist/$zip.sha256") -cne "$hash  $zip") { throw "Checksum mismatch for $zip" }
+            $dir = Join-Path $env:RUNNER_TEMP $zip.Replace('.zip','')
+            Expand-Archive -LiteralPath "dist/$zip" -DestinationPath $dir
+            $programs = Join-Path $dir pingtable
+            $cli = Join-Path $programs pingtable-cli.exe
+            $reported = & $cli --version
+            if ($LASTEXITCODE -ne 0 -or $reported -cne "pingtable $version") { throw "CLI version mismatch in $zip" }
+            foreach ($exe in Get-ChildItem -LiteralPath $programs -Filter '*.exe') {
+              if ((Get-AuthenticodeSignature -LiteralPath $exe.FullName).Status -ne 'NotSigned') {
+                throw "Unexpected Authenticode status for $($exe.Name)"
+              }
+            }
+            if ($zip -eq $native) {
+              if (!(Test-Path "$programs/pingtable.exe") -or !(Test-Path "$programs/WebView2Loader.dll")) {
+                throw 'Desktop files are missing'
+              }
+              # The native test harness may also import the WebView2 loader.
+              $programs | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            } elseif (Test-Path "$programs/WebView2Loader.dll") { throw 'Unexpected loader in browser ZIP' }
+          }
+      - name: Run the Windows source tests
+        shell: bash
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component clippy --no-self-update
+          rustup default "$RUST_TOOLCHAIN"
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  publish:
+    name: Publish verified release assets
+    needs: [build, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact }}
+          merge-multiple: true
+          path: dist
+      - name: Complete the draft and publish it
+        shell: bash
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=$GITHUB_REF_NAME
+          version=${tag#v}
+          native="pingtable-$version-windows-x64.zip"
+          browser="pingtable-$version-browser-windows-x64.zip"
+          assets=("$native" "$browser" "$native.sha256" "$browser.sha256" SHA256SUMS)
+          sha256sum -- "$native" "$browser" | cmp - SHA256SUMS
+          verify_published() {
+            local destination
+            destination=$(mktemp -d)
+            for asset in "${assets[@]}"; do
+              gh release download "$tag" --pattern "$asset" --dir "$destination"
+            done
+            (
+              cd "$destination"
+              sha256sum -- "$native" "$browser" | cmp - SHA256SUMS
+              cat "$native.sha256" "$browser.sha256" | cmp - SHA256SUMS
+            )
+          }
+          if draft=$(gh release view "$tag" --json isDraft --jq '.isDraft'); then
+            if [[ "$draft" == false ]]; then
+              verify_published
+              echo "$tag is already published and its assets verify."
+              exit 0
+            fi
+          else
+            gh release create "$tag" --verify-tag --draft --title "Pingtable $version" --notes-file release-notes.md
+          fi
+          existing=$(gh release view "$tag" --json assets --jq '.assets[].name')
+          for asset in "${assets[@]}"; do
+            if grep -Fxq -- "$asset" <<< "$existing"; then
+              gh release download "$tag" --pattern "$asset" --output "$RUNNER_TEMP/draft-asset" --clobber
+              cmp -- "$asset" "$RUNNER_TEMP/draft-asset"
+            else
+              gh release upload "$tag" "$asset"
+            fi
+          done
+          verify_published
+          gh release edit "$tag" --draft=false --notes-file release-notes.md
