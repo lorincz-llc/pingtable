@@ -2,7 +2,13 @@
 
 [pingtable.net](https://pingtable.net)
 
-Ping hosts and watch named TCP services in one table. One Rust program runs
+Monitor ping and TCP connectivity across many hosts in one live table. Paste a
+list such as `web-01.example:443`, `web-02.example:443` and `db.example:5432`
+to see which ports accept connections, how long each connection takes and which
+checks are refused or time out. Add a bare hostname to watch its ICMP replies
+alongside those TCP checks.
+
+One Rust program runs
 the checks and serves the interface on `127.0.0.1`. The same interface runs in a native Windows window,
 in a browser tab, or as an installed Chrome app, and the same checks run from
 the command line, from a script through a local API, and from an AI agent

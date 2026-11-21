@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 const HELP: &str = "\
-pingtable - ping many hosts and watch them in one table
+pingtable - monitor ping and TCP connectivity across many hosts
 
 This is the command-line program (pingtable-cli.exe on Windows). The app in
 its own window is pingtable.exe; both use the same settings and host list.

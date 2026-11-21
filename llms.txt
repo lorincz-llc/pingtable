@@ -1,8 +1,8 @@
 # pingtable
 
 > Pingtable is a free host monitor with a live table, command line, local
-> HTTP API and MCP server. It monitors ICMP replies and named TCP services
-> such as example.com:443, measures latency and traces routes. Its source
+> HTTP API and MCP server. It monitors ICMP replies and TCP connectivity across many
+> hosts in one table, measures latency and traces routes. Its source
 > is available under Apache 2.0.
 
 Checks are sent from the computer pingtable runs on. Use it only on hosts the

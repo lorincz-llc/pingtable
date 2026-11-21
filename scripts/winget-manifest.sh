@@ -82,9 +82,9 @@ PackageUrl: {source}
 License: Apache-2.0
 LicenseUrl: {source}/blob/main/LICENSE
 Copyright: Copyright 2026 Lorincz LLC
-ShortDescription: Monitor hosts and named TCP services in one table.
+ShortDescription: Monitor ping and TCP connectivity across many hosts.
 Description: |-
-  pingtable pings every machine you care about, once a second, and shows who is answering, how fast, and who just stopped.
+  Monitor ICMP replies and TCP connections to the ports on your host list. Compare connection times and see which services accept, refuse or time out.
   It traces routes, measures loss and jitter, and can alert when a monitored host or TCP service goes down.
   It comes as a window app (pingtable) and a command-line program (pingtable-cli) with JSON output, a local HTTP API and an MCP server for AI agents.
   No installer and no administrator rights are needed.

@@ -1,7 +1,7 @@
 {
   "name": "pingtable",
   "short_name": "pingtable",
-  "description": "Ping many hosts and watch them in one table.",
+  "description": "Monitor ping and TCP connectivity across many hosts.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

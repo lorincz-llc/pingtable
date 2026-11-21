@@ -36,7 +36,7 @@
     <Application Id="pingtable" Executable="pingtable.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="pingtable"
-        Description="Ping many hosts and watch them in one table"
+        Description="Monitor ping and TCP connectivity across many hosts"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png" />

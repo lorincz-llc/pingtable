@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<meta name="description" content="Ping hosts and monitor named TCP services in one table. A free, open-source Windows app written in Rust. No installer, no administrator rights.">
-<title>pingtable: ping many hosts, watch them in one table</title>
+<meta name="description" content="Monitor ping and TCP connectivity across many hosts in one live table. Track connection times, refusals and timeouts for each port. A free, open-source Windows app written in Rust. No installer, no administrator rights.">
+<title>pingtable · Multi-host ping and TCP monitoring</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/styles.css">
 <script src="/app.js"></script>
@@ -27,8 +27,8 @@
 
 <main>
   <section class="hero">
-    <h1>Ping many hosts. Watch them in one table.</h1>
-    <p class="lead">See which hosts answer, how fast they respond and when a service stops accepting connections.</p>
+    <h1>Monitor ping and TCP connectivity across many hosts.</h1>
+    <p class="lead">Watch port 443 across your web servers or check a different port on each host. One live table shows ping replies, TCP connection times, refusals and timeouts.</p>
     <div class="actions">
       <a class="btn primary" href="https://github.com/lorincz-llc/pingtable/releases/latest">Download for Windows</a>
       <a class="btn" href="https://github.com/lorincz-llc/pingtable">Source on GitHub</a>
@@ -45,7 +45,7 @@
       <iframe class="demo-frame" id="demo-frame" src="/demo/" sandbox="allow-scripts allow-downloads" allow="clipboard-write" referrerpolicy="no-referrer" loading="lazy" title="pingtable demo: the app's own window, replaying a recorded run"></iframe>
       <p class="demo-blocked">The demo cannot be shown inside this page. <a href="/demo/">Open it on its own page</a>.</p>
     </div>
-    <p class="demo-caption">This is pingtable's own interface, replaying 10 minutes of real pinging recorded on 21 November 2026 from a home connection. Nothing is pinged from your browser. <b>Click a row</b> for its history; <b>right-click it</b> to copy it for a ticket, a chat or a spreadsheet.</p>
+    <p class="demo-caption">This is pingtable's own interface, replaying 10 minutes of ICMP pings and TCP connection checks recorded on 21 November 2026 from a home connection. <b>Click a row</b> for its history; <b>right-click it</b> to copy it for a ticket, a chat or a spreadsheet.</p>
     <noscript><p class="demo-caption">The demo needs JavaScript. The rest of this page does not.</p></noscript>
     <h3 class="demo-sub">What to look for</h3>
     <ul class="plain demo-notes">
@@ -61,8 +61,8 @@
   <section id="what" class="block">
     <h2>What it does</h2>
     <div class="features">
-      <article class="feature"><h3>One table</h3><p>Every host on one screen: state, last and average round trip, a trend of the last 60 pings, loss, IP address and name.</p></article>
-      <article class="feature"><h3>Monitor a TCP service</h3><p>Add a service such as <code>example.com:443</code> to watch its availability, latency and loss alongside the hosts you ping.</p></article>
+      <article class="feature"><h3>One table</h3><p>Compare ping round-trip times and TCP connect times side by side. Each row shows its current state, recent trend and failed checks.</p></article>
+      <article class="feature"><h3>Check TCP ports across hosts</h3><p>Paste <code>web-01.example:443</code> and <code>web-02.example:443</code> on separate lines to watch both servers. Add <code>db.example:5432</code> to track the database port alongside them.</p></article>
       <article class="feature"><h3>Add hosts fast</h3><p>Type a host, choose ping or ports, press Enter. Paste a list. Import a CSV file from another ping tool, or drop it on the window.</p></article>
       <article class="feature"><h3>Act on a selection</h3><p>Click, Ctrl-click or Shift-click rows, then right-click: mute, ping now, ping only these, measure, trace the route, reset counters.</p></article>
       <article class="feature"><h3>Copy as text, Markdown, JSON or TSV</h3><p>Right-click a host, a group or the whole table: text for a chat or a ticket, Markdown for GitHub or a wiki, JSON for a program or an AI agent, TSV for a spreadsheet.</p></article>
@@ -88,7 +88,7 @@ example.com  tcp:443  UP       12.80</pre>
         <li><b>OK.</b> The service accepted the TCP connection.</li>
         <li><b>Connection refused.</b> The host rejected the connection.</li>
         <li><b>Timed out.</b> The service did not answer within the configured timeout.</li>
-        <li><b>Nothing is sent.</b> The connection is closed the moment it opens.</li>
+        <li><b>What a success measures.</b> Pingtable times the TCP connection and closes it before sending application data.</li>
       </ul>
     </div>
   </section>
@@ -106,7 +106,7 @@ example.com  tcp:443  UP       12.80</pre>
     <div id="download">
       <h2>Download</h2>
       <ol class="plain steps">
-        <li><span>Choose the native window or browser ZIP from the <a href="https://github.com/lorincz-llc/pingtable/releases/latest">latest release</a>.</span></li>
+        <li><span>Both editions monitor ping and TCP ports across multiple hosts. Choose the native window or browser ZIP from the <a href="https://github.com/lorincz-llc/pingtable/releases/latest">latest release</a>.</span></li>
         <li><span>Unpack it in a folder only your account can change.</span></li>
         <li><span>Double-click <code>pingtable.exe</code> for the native window or <code>pingtable-cli.exe</code> for the browser table.</span></li>
       </ol>
